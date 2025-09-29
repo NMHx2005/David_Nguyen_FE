@@ -1,0 +1,290 @@
+import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { MatCardModule } from '@angular/material/card';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { Group, GroupStatus } from '../../../../models/group.model';
+
+@Component({
+  selector: 'app-groups-grid',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatCardModule,
+    MatButtonModule,
+    MatIconModule,
+    MatChipsModule,
+    MatTooltipModule
+  ],
+  template: `
+    <div class="groups-container">
+      <mat-card *ngFor="let group of groups" class="group-card">
+        <mat-card-header>
+          <mat-card-title>{{ group.name }}</mat-card-title>
+          <mat-chip class="group-status" [ngClass]="group.status">
+            {{ getStatusLabel(group.status) }}
+          </mat-chip>
+        </mat-card-header>
+
+        <mat-card-content>
+          <p class="group-description">{{ group.description || 'No description available' }}</p>
+
+          <div class="group-meta">
+            <div class="meta-item">
+              <mat-icon>groups</mat-icon>
+              <span>{{ group.members.length || 0 }} members</span>
+            </div>
+            <div class="meta-item">
+              <mat-icon>chat</mat-icon>
+              <span>{{ group.channels.length || 0 }} channels</span>
+            </div>
+            <div class="meta-item">
+              <mat-icon>calendar_today</mat-icon>
+              <span>{{ formatDate(group.createdAt) }}</span>
+            </div>
+          </div>
+
+          <div class="group-categories">
+            <mat-chip class="category-tag">
+              {{ group.category | titlecase }}
+            </mat-chip>
+          </div>
+        </mat-card-content>
+
+        <mat-card-actions>
+          <button 
+            *ngIf="!isMember(group) && !hasPendingRequest(group)"
+            mat-raised-button
+            color="primary"
+            (click)="onRegisterInterest(group)"
+            [disabled]="group.status === GroupStatus.INACTIVE"
+            matTooltip="{{ group.status === GroupStatus.INACTIVE ? 'Group is inactive' : 'Register interest to join' }}">
+            {{ group.status === GroupStatus.INACTIVE ? 'Inactive' : 'Register Interest' }}
+          </button>
+
+          <button 
+            *ngIf="isMember(group)"
+            mat-button
+            color="accent"
+            (click)="onViewGroup(group)"
+            matTooltip="View group details">
+            <mat-icon>visibility</mat-icon>
+            View Group
+          </button>
+
+          <button 
+            *ngIf="hasPendingRequest(group)"
+            mat-button
+            color="accent"
+            disabled
+            matTooltip="Request pending approval">
+            Request Pending
+          </button>
+
+          <button 
+            *ngIf="!isMember(group) && group.status === GroupStatus.PENDING"
+            mat-button
+            color="accent"
+            (click)="onRequestInvite(group)"
+            matTooltip="Request an invitation">
+            <mat-icon>mail</mat-icon>
+            Request Invite
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    </div>
+
+    <!-- Empty State -->
+    <div *ngIf="groups.length === 0" class="empty-state">
+      <mat-icon class="empty-icon">group_work</mat-icon>
+      <h3>No groups found</h3>
+      <p>Try adjusting your search criteria or check back later for new groups.</p>
+    </div>
+  `,
+  styles: [`
+    .groups-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .group-card {
+      border-radius: 12px;
+      transition: all 0.3s ease;
+      background: white;
+    }
+
+    .group-card:hover {
+      box-shadow: 0 8px 16px rgba(102, 126, 234, 0.15);
+      transform: translateY(-4px);
+    }
+
+    .group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .group-header mat-card-title {
+      font-size: 1.3rem;
+      color: #333;
+    }
+
+    .group-status {
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .group-status.open {
+      background: #e8f5e8 !important;
+      color: #2e7d32 !important;
+    }
+
+    .group-status.closed {
+      background: #fce4ec !important;
+      color: #c2185b !important;
+    }
+
+    .group-status.invite {
+      background: #fff3e0 !important;
+      color: #ef6c00 !important;
+    }
+
+    .group-description {
+      color: #666;
+      line-height: 1.5;
+      margin: 16px 0;
+    }
+
+    .group-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    .meta-item mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .group-categories {
+      margin-bottom: 16px;
+    }
+
+    .category-tag {
+      background: #e3f2fd !important;
+      color: #1976d2 !important;
+    }
+
+    .group-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+
+    .empty-icon {
+      font-size: 64px;
+      color: #ddd;
+      margin-bottom: 16px;
+    }
+
+    .empty-state h3 {
+      margin: 0 0 8px 0;
+      color: #333;
+    }
+
+    .empty-state p {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+
+    @media (max-width: 768px) {
+      .groups-container {
+        grid-template-columns: 1fr;
+      }
+
+      .group-actions {
+        flex-direction: column;
+      }
+    }
+  `]
+})
+export class GroupsGridComponent {
+  @Input() groups: Group[] = [];
+  @Input() currentUser: any = null;
+  @Input() pendingRequests: string[] = [];
+
+  GroupStatus = GroupStatus;
+
+  @Output() registerInterest = new EventEmitter<string>();
+  @Output() viewGroup = new EventEmitter<string>();
+  @Output() requestInvite = new EventEmitter<string>();
+
+  getStatusLabel(status: GroupStatus | string): string {
+    const s = (typeof status === 'string') ? status.toString().toUpperCase() : status;
+    switch (s) {
+      case GroupStatus.ACTIVE:
+      case 'ACTIVE':
+        return 'Active';
+      case GroupStatus.INACTIVE:
+      case 'INACTIVE':
+        return 'Inactive';
+      case GroupStatus.PENDING:
+      case 'PENDING':
+        return 'Pending';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  formatDate(date: Date | string): string {
+    if (!date) return 'Unknown';
+    const d = new Date(date);
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  }
+
+  isMember(group: Group): boolean {
+    if (!this.currentUser || !group.members) return false;
+    return group.members.includes(this.currentUser.id);
+  }
+
+  hasPendingRequest(group: Group): boolean {
+    return this.pendingRequests.includes(group.id);
+  }
+
+  onRegisterInterest(group: Group): void {
+    this.registerInterest.emit(group.id);
+  }
+
+  onViewGroup(group: Group): void {
+    this.viewGroup.emit(group.id);
+  }
+
+  onRequestInvite(group: Group): void {
+    this.requestInvite.emit(group.id);
+  }
+}

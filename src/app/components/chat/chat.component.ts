@@ -154,7 +154,7 @@ import { AuthService } from '../../services/auth.service';
                     placeholder="Type a message..."
                     maxlength="1000">
                   </textarea>
-                  <mat-hint align="end">{{ newMessage.length }}/1000</mat-hint>
+                  <mat-hint align="end">{{ newMessage.length || 0 }}/1000</mat-hint>
                 </mat-form-field>
                 <div class="input-actions">
                   <button mat-icon-button type="button" matTooltip="Attach File">
@@ -1043,11 +1043,13 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     const storedMessages = localStorage.getItem(messagesKey);
     if (storedMessages) {
       const messages = JSON.parse(storedMessages);
-      if (messages.length > 0) {
+      if (messages && messages.length > 0) {
         const lastMessage = messages[messages.length - 1];
-        return lastMessage.text.length > 30 ?
-          lastMessage.text.substring(0, 30) + '...' :
-          lastMessage.text;
+        if (lastMessage && lastMessage.text) {
+          return lastMessage.text.length > 30 ?
+            lastMessage.text.substring(0, 30) + '...' :
+            lastMessage.text;
+        }
       }
     }
     return 'No messages yet';

@@ -29,6 +29,10 @@ export const routes: Routes = [
     path: 'register',
     loadComponent: () => import('./components/auth/register.component').then(m => m.RegisterComponent)
   },
+  {
+    path: 'test-auth',
+    loadComponent: () => import('./components/test-auth.component').then(m => m.TestAuthComponent)
+  },
 
   // Authenticated client pages
   {
@@ -75,10 +79,11 @@ export const routes: Routes = [
     path: 'admin',
     canActivate: [AuthGuard, RoleGuard],
     data: { roles: [UserRole.GROUP_ADMIN, UserRole.SUPER_ADMIN] },
+    loadComponent: () => import('./components/simple-admin-layout.component').then(m => m.SimpleAdminLayoutComponent),
     children: [
       {
         path: '',
-        loadComponent: () => import('./components/admin/admin-dashboard.component').then(m => m.AdminDashboardComponent)
+        loadComponent: () => import('./components/simple-admin-dashboard.component').then(m => m.SimpleAdminDashboardComponent)
       },
       {
         path: 'users',
@@ -93,7 +98,7 @@ export const routes: Routes = [
         data: { roles: [UserRole.GROUP_ADMIN, UserRole.SUPER_ADMIN] }
       },
       {
-        path: 'groups/:groupId',
+        path: 'groups/:id',
         loadComponent: () => import('./components/admin/admin-group-detail.component').then(m => m.AdminGroupDetailComponent),
         canActivate: [RoleGuard],
         data: { roles: [UserRole.GROUP_ADMIN, UserRole.SUPER_ADMIN] }

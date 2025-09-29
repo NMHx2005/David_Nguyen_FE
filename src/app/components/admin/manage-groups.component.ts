@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit } from '@angular/core';
+import { Component, Inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators, FormGroup } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
@@ -13,8 +13,11 @@ import { MatDialogModule, MatDialog, MatDialogRef, MAT_DIALOG_DATA } from '@angu
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { Subject, takeUntil } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
-import { AdminLayoutComponent } from '../layouts/admin-layout.component';
+import { GroupsManagementService } from '../../services/admin/groups-management.service';
+import { GroupsTableComponent } from '../ui/admin/groups-table.component';
+import { GroupsStatsComponent } from '../ui/admin/groups-stats.component';
 import { User, UserRole } from '../../models/user.model';
 import { Group, GroupStatus } from '../../models/group.model';
 
@@ -128,10 +131,8 @@ export class CreateGroupDialogComponent {
     MatTooltipModule,
     MatDialogModule,
     MatSnackBarModule,
-    AdminLayoutComponent
   ],
   template: `
-    <app-admin-layout [pageTitle]="'Manage Groups'">
       <div class="manage-groups-container">
         <!-- Header Section -->
         <mat-card class="page-header-card">
@@ -370,7 +371,6 @@ export class CreateGroupDialogComponent {
           </mat-card-content>
         </mat-card>
       </div>
-    </app-admin-layout>
   `,
   styles: [`
     .manage-groups-container {

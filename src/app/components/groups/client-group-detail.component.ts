@@ -552,7 +552,7 @@ export class ClientGroupDetailComponent implements OnInit {
    * Navigate back to dashboard.
    */
   goBack(): void {
-    this.router.navigate(['/dashboard']);
+    this.router.navigate(['/groups']);
   }
 
   /**
