@@ -46,6 +46,11 @@ export const routes: Routes = [
     canActivate: [AuthGuard]
   },
   {
+    path: 'realtime-chat',
+    loadComponent: () => import('./components/chat/realtime-chat.component').then(m => m.RealtimeChatComponent),
+    canActivate: [AuthGuard]
+  },
+  {
     path: 'channels',
     loadComponent: () => import('./components/channels/channels.component').then(m => m.ChannelsComponent),
     canActivate: [AuthGuard]

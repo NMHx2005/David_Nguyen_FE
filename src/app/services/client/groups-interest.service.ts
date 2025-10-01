@@ -100,6 +100,23 @@ export class GroupsInterestService {
         return this.registerInterest(groupId);
     }
 
+    getUserGroups(): Observable<{ groups: Group[] }> {
+        return this.currentUser$.pipe(
+            map(currentUser => {
+                if (!currentUser) {
+                    return { groups: [] };
+                }
+
+                const allGroups = this.groupsSubject.value;
+                const userGroups = allGroups.filter(group =>
+                    group.members?.includes(currentUser.id)
+                );
+
+                return { groups: userGroups };
+            })
+        );
+    }
+
     private filterGroups(groups: Group[], filters: GroupsFilters, currentUser: User | null): Group[] {
         return groups.filter(group => {
             // Search filter

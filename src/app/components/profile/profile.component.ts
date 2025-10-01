@@ -10,6 +10,7 @@ import { ProfileHeaderComponent } from '../ui/client/profile/profile-header.comp
 import { ProfileInfoComponent } from '../ui/client/profile/profile-info.component';
 import { ProfileEditComponent } from '../ui/client/profile/profile-edit.component';
 import { ProfileGroupsComponent } from '../ui/client/profile/profile-groups.component';
+import { AvatarUploadComponent } from '../ui/avatar-upload.component';
 import { User } from '../../models/user.model';
 import { Group } from '../../models/group.model';
 
@@ -23,7 +24,8 @@ import { Group } from '../../models/group.model';
     ProfileHeaderComponent,
     ProfileInfoComponent,
     ProfileEditComponent,
-    ProfileGroupsComponent
+    ProfileGroupsComponent,
+    AvatarUploadComponent
   ],
   template: `
     <app-client-layout [pageTitle]="'Profile'" [pageDescription]="'Manage your account and preferences'">
