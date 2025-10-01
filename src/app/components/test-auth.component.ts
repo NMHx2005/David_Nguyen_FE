@@ -1,12 +1,12 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { AuthService } from '../services/auth.service';
+import { AuthService } from './auth/auth.service';
 
 @Component({
-    selector: 'app-test-auth',
-    standalone: true,
-    imports: [CommonModule],
-    template: `
+  selector: 'app-test-auth',
+  standalone: true,
+  imports: [CommonModule],
+  template: `
     <div style="padding: 20px; border: 2px solid #ccc; margin: 20px;">
       <h2>Authentication Test</h2>
       <p><strong>Is Authenticated:</strong> {{ authService.isAuthenticated() }}</p>
@@ -24,22 +24,22 @@ import { AuthService } from '../services/auth.service';
       </div>
     </div>
   `,
-    styles: [``]
+  styles: [``]
 })
 export class TestAuthComponent implements OnInit {
-    constructor(public authService: AuthService) { }
+  constructor(public authService: AuthService) { }
 
-    ngOnInit(): void {
-        console.log('TestAuthComponent initialized');
-    }
+  ngOnInit(): void {
+    console.log('TestAuthComponent initialized');
+  }
 
-    async testLogin(username: string, password: string): Promise<void> {
-        console.log(`Testing login with ${username}/${password}`);
-        const success = await this.authService.login(username, password);
-        console.log('Login result:', success);
-    }
+  async testLogin(username: string, password: string): Promise<void> {
+    console.log(`Testing login with ${username}/${password}`);
+    const success = await this.authService.login(username, password);
+    console.log('Login result:', success);
+  }
 
-    logout(): void {
-        this.authService.logout();
-    }
+  logout(): void {
+    this.authService.logout();
+  }
 }
