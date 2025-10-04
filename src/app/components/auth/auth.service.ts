@@ -266,16 +266,23 @@ export class AuthService {
     console.log('🔍 AuthService.getAuthHeaders - Current user:', user);
     console.log('🔍 AuthService.getAuthHeaders - User token:', user?.token);
 
-    if (user && user.token) {
+    // Try to get token from user object first, then fallback to localStorage
+    let token = user?.token;
+    if (!token) {
+      token = localStorage.getItem('auth_token') || undefined;
+      console.log('🔍 AuthService.getAuthHeaders - Fallback token from localStorage:', token);
+    }
+
+    if (token) {
       const headers = {
-        'Authorization': `Bearer ${user.token}`,
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       };
       console.log('🔍 AuthService.getAuthHeaders - Headers with token:', headers);
       return headers;
     }
 
-    console.log('🔍 AuthService.getAuthHeaders - No token, returning headers without auth');
+    console.log('🔍 AuthService.getAuthHeaders - No token found, returning headers without auth');
     return {
       'Content-Type': 'application/json'
     };

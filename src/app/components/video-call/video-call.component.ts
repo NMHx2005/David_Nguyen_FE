@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, Input, Output, EventEmitter } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, Input, Output, EventEmitter, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -670,6 +670,9 @@ export class VideoCallComponent implements OnInit, OnDestroy {
   @Input() receiverName: string = '';
   @Output() callEnded = new EventEmitter<void>();
 
+  @ViewChild('localVideo', { static: false }) localVideoRef!: ElementRef<HTMLVideoElement>;
+  @ViewChild('remoteVideo', { static: false }) remoteVideoRef!: ElementRef<HTMLVideoElement>;
+
   private destroy$ = new Subject<void>();
 
   // Services
@@ -711,8 +714,11 @@ export class VideoCallComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    console.log('🔍 VideoCallComponent - Component destroying');
     this.destroy$.next();
     this.destroy$.complete();
+    this.stopCallTimer();
+    this.endCall();
     this.cleanupCall();
   }
 
@@ -820,20 +826,64 @@ export class VideoCallComponent implements OnInit, OnDestroy {
    * End current call
    */
   endCall(): void {
-    if (!this.currentCall) return;
+    // Perform immediate cleanup for better performance
+    this.performImmediateCleanup();
 
-    this.videoCallService.endCall(this.currentCall._id)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (response) => {
-          this.cleanupCall();
-          this.snackBar.open('Call ended', 'Close', { duration: 2000 });
-        },
-        error: (error) => {
-          console.error('Error ending call:', error);
-          this.cleanupCall();
-        }
+    // End PeerJS call
+    this.peerJSService.endCall();
+
+    // Handle backend call end
+    if (this.currentCall) {
+      this.videoCallService.endCall(this.currentCall._id)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (response) => {
+            this.performFinalCleanup();
+            this.snackBar.open('Call ended', 'Close', { duration: 2000 });
+          },
+          error: (error) => {
+            this.performFinalCleanup();
+          }
+        });
+    } else {
+      this.performFinalCleanup();
+    }
+  }
+
+  /**
+   * Perform immediate cleanup operations
+   */
+  private performImmediateCleanup(): void {
+    // Stop timer immediately
+    this.stopCallTimer();
+
+    // Clean up local stream
+    if ((this as any).localStream) {
+      (this as any).localStream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+      (this as any).localStream = null;
+    }
+
+    // Update UI state immediately
+    this.isInCall = false;
+    this.isCameraOn = false;
+    this.isMuted = false;
+  }
+
+  /**
+   * Perform final cleanup operations
+   */
+  private performFinalCleanup(): void {
+    // Use requestIdleCallback for non-critical cleanup
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(() => {
+        this.cleanupCall();
       });
+    } else {
+      // Fallback for browsers without requestIdleCallback
+      setTimeout(() => {
+        this.cleanupCall();
+      }, 0);
+    }
   }
 
   /**
@@ -935,11 +985,13 @@ export class VideoCallComponent implements OnInit, OnDestroy {
    * Cleanup call resources
    */
   private cleanupCall(): void {
+    // Reset call state
     this.isInCall = false;
     this.currentCall = null;
     this.callStartTime = null;
     this.callDuration = 0;
 
+    // Clear timer
     if (this.durationInterval) {
       clearInterval(this.durationInterval);
       this.durationInterval = null;
@@ -953,6 +1005,7 @@ export class VideoCallComponent implements OnInit, OnDestroy {
     // Cleanup WebRTC resources
     this.webrtcService.cleanup();
 
+    // Reset media states
     this.remoteStream = null;
     this.isRemoteVideoActive = false;
     this.isMuted = false;
@@ -960,8 +1013,19 @@ export class VideoCallComponent implements OnInit, OnDestroy {
     this.isScreenSharing = false;
     this.isRecording = false;
 
+    // Emit events and refresh history
     this.callEnded.emit();
-    this.loadCallHistory(); // Refresh history
+
+    // Use requestIdleCallback for non-critical operations
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(() => {
+        this.loadCallHistory();
+      });
+    } else {
+      setTimeout(() => {
+        this.loadCallHistory();
+      }, 100);
+    }
   }
 
   /**
@@ -1226,7 +1290,7 @@ export class VideoCallComponent implements OnInit, OnDestroy {
     // Initialize WebRTC with PeerJS
     await this.initializeWebRTCWithPeerJS(receiverId);
 
-    this.snackBar.open(`Calling ${receiverName}...`, 'Close', { duration: 3000 });
+    this.snackBar.open(`Starting group video call for channel...`, 'Close', { duration: 3000 });
   }
 
   /**
@@ -1234,7 +1298,21 @@ export class VideoCallComponent implements OnInit, OnDestroy {
    */
   closeDialog(): void {
     console.log('🔍 VideoCallComponent - Closing dialog');
+    this.stopCallTimer();
+    this.endCall();
     this.callEnded.emit();
+  }
+
+  /**
+   * Stop call timer
+   */
+  private stopCallTimer(): void {
+    // Stop the duration timer
+    if (this.durationInterval) {
+      clearInterval(this.durationInterval);
+      this.durationInterval = null;
+      console.log('🔍 VideoCallComponent - Call timer stopped');
+    }
   }
 
   /**
@@ -1242,15 +1320,20 @@ export class VideoCallComponent implements OnInit, OnDestroy {
    */
   private startCallTimer(): void {
     console.log('🔍 VideoCallComponent - Starting call timer');
-    // Timer logic would go here
-    // For now, just log that timer started
+
+    // Set call start time for the existing timer system
+    this.callStartTime = new Date();
+    this.callDuration = 0;
+
+    // Start the existing duration timer
+    this.startCallDurationTimer();
   }
 
   /**
-   * Initialize WebRTC with PeerJS
+   * Initialize WebRTC with PeerJS (Group Call Mode)
    */
   private async initializeWebRTCWithPeerJS(receiverId: string): Promise<void> {
-    console.log('🔍 VideoCallComponent - Initializing WebRTC with PeerJS');
+    console.log('🔍 VideoCallComponent - Initializing WebRTC with PeerJS (Group Call Mode)');
 
     try {
       // Subscribe to call events first
@@ -1268,21 +1351,43 @@ export class VideoCallComponent implements OnInit, OnDestroy {
         return;
       }
 
-      // Start PeerJS call
-      const success = await this.peerJSService.startCall(receiverId);
-
-      if (success) {
-        console.log('🔍 VideoCallComponent - PeerJS call started successfully');
-
-        // Get local stream and display it
-        const localStream = this.peerJSService.getLocalStream();
-        if (localStream) {
-          this.displayLocalVideo(localStream);
+      // Start group video call for the channel
+      if (this.channelId) {
+        console.log('🔍 VideoCallComponent - Starting group video call for channel:', this.channelId);
+        const success = await this.peerJSService.startGroupVideoCall(this.channelId);
+        if (success) {
+          console.log('🔍 VideoCallComponent - Group video call started successfully');
+        } else {
+          console.log('🔍 VideoCallComponent - Failed to start group video call, falling back to local mode');
+          await this.initializeWebRTCLocalMode();
         }
-
       } else {
-        console.log('🔍 VideoCallComponent - PeerJS call failed, falling back to local mode');
+        console.log('🔍 VideoCallComponent - No channel ID, falling back to local mode');
         await this.initializeWebRTCLocalMode();
+      }
+
+      // Debug video elements
+      this.debugVideoElements();
+
+      // Group call is now active - display local video
+      const localStream = this.peerJSService.getLocalStream();
+      if (localStream) {
+        this.displayLocalVideo(localStream);
+        console.log('🔍 VideoCallComponent - Group video call is now active with local video');
+      } else {
+        console.log('🔍 VideoCallComponent - No local stream available, getting user media directly');
+        // Get user media directly if PeerJS doesn't have it
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          });
+          this.displayLocalVideo(stream);
+          (this as any).localStream = stream;
+          console.log('🔍 VideoCallComponent - Got user media directly and displayed');
+        } catch (error) {
+          console.error('🔍 VideoCallComponent - Failed to get user media:', error);
+        }
       }
 
     } catch (error) {
@@ -1328,16 +1433,23 @@ export class VideoCallComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle PeerJS events
+   * Handle PeerJS events (Group Call Mode)
    */
   private handlePeerJSEvent(event: CallEvent): void {
     console.log('🔍 VideoCallComponent - PeerJS event:', event.type);
 
     switch (event.type) {
+      case 'connection_established':
+        if (event.data?.roomId) {
+          console.log('🔍 VideoCallComponent - Joined video room:', event.data.roomId);
+          this.snackBar.open(`Joined video room: ${event.data.roomId}`, 'Close', { duration: 3000 });
+        }
+        break;
+
       case 'call_answered':
         if (event.data?.remoteStream) {
-          this.displayRemoteVideo(event.data.remoteStream);
-          this.snackBar.open('Call connected!', 'Close', { duration: 3000 });
+          this.displayRemoteVideo(event.data.remoteStream, event.data.peerId);
+          this.snackBar.open(`Connected to ${event.data.peerId}!`, 'Close', { duration: 3000 });
         }
         break;
 
@@ -1357,11 +1469,38 @@ export class VideoCallComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Debug video elements
+   */
+  private debugVideoElements(): void {
+    console.log('🔍 VideoCallComponent - Debugging video elements:');
+    console.log('🔍 VideoCallComponent - localVideoRef:', this.localVideoRef);
+    console.log('🔍 VideoCallComponent - remoteVideoRef:', this.remoteVideoRef);
+
+    const localVideoElement = document.querySelector('#localVideo');
+    const remoteVideoElement = document.querySelector('#remoteVideo');
+
+    console.log('🔍 VideoCallComponent - localVideo element:', localVideoElement);
+    console.log('🔍 VideoCallComponent - remoteVideo element:', remoteVideoElement);
+
+    if (localVideoElement) {
+      const htmlElement = localVideoElement as HTMLElement;
+      console.log('🔍 VideoCallComponent - localVideo dimensions:', {
+        width: htmlElement.clientWidth,
+        height: htmlElement.clientHeight,
+        offsetWidth: htmlElement.offsetWidth,
+        offsetHeight: htmlElement.offsetHeight
+      });
+    }
+  }
+
+  /**
    * Display local video stream
    */
   private displayLocalVideo(stream: MediaStream): void {
-    const localVideo = document.querySelector('#localVideo') as HTMLVideoElement;
-    if (localVideo) {
+    console.log('🔍 VideoCallComponent - displayLocalVideo called with stream:', stream);
+
+    if (this.localVideoRef?.nativeElement) {
+      const localVideo = this.localVideoRef.nativeElement;
       localVideo.srcObject = stream;
       localVideo.play().catch(e => console.error('Error playing local video:', e));
 
@@ -1369,19 +1508,90 @@ export class VideoCallComponent implements OnInit, OnDestroy {
       this.isCameraOn = stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
       this.isMuted = stream.getAudioTracks().length === 0 || !stream.getAudioTracks()[0].enabled;
 
-      console.log('🔍 VideoCallComponent - Local video displayed, Camera:', this.isCameraOn, 'Mic:', this.isMuted);
+      console.log('🔍 VideoCallComponent - Local video displayed successfully, Camera:', this.isCameraOn, 'Mic:', this.isMuted);
+    } else {
+      console.error('🔍 VideoCallComponent - Local video element not found!');
+      // Fallback to document.querySelector
+      const localVideo = document.querySelector('#localVideo') as HTMLVideoElement;
+      if (localVideo) {
+        localVideo.srcObject = stream;
+        localVideo.play().catch(e => console.error('Error playing local video:', e));
+        console.log('🔍 VideoCallComponent - Local video displayed via fallback');
+      } else {
+        console.error('🔍 VideoCallComponent - No local video element found anywhere!');
+      }
     }
   }
 
   /**
    * Display remote video stream
    */
-  private displayRemoteVideo(stream: MediaStream): void {
-    const remoteVideo = document.querySelector('#remoteVideo') as HTMLVideoElement;
-    if (remoteVideo) {
+  private displayRemoteVideo(stream: MediaStream, peerId?: string): void {
+    console.log('🔍 VideoCallComponent - displayRemoteVideo called with stream:', stream, 'from peer:', peerId);
+
+    if (this.remoteVideoRef?.nativeElement) {
+      const remoteVideo = this.remoteVideoRef.nativeElement;
+
+      // Check if this is the same stream to avoid unnecessary updates
+      if (remoteVideo.srcObject === stream) {
+        console.log('🔍 VideoCallComponent - Same stream, skipping update');
+        return;
+      }
+
       remoteVideo.srcObject = stream;
-      remoteVideo.play().catch(e => console.error('Error playing remote video:', e));
-      console.log('🔍 VideoCallComponent - Remote video displayed');
+      // Handle video play with proper error handling
+      const playPromise = remoteVideo.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log('🔍 VideoCallComponent - Remote video playing successfully from:', peerId);
+            this.isRemoteVideoActive = true;
+          })
+          .catch(error => {
+            // Only log non-abort errors to reduce console spam
+            if (error.name !== 'AbortError') {
+              console.error('Error playing remote video:', error);
+            } else {
+              console.log('🔍 VideoCallComponent - Video play interrupted (this is normal)');
+            }
+          });
+      }
+      this.isRemoteVideoActive = true;
+      console.log('🔍 VideoCallComponent - Remote video displayed successfully from:', peerId);
+    } else {
+      console.error('🔍 VideoCallComponent - Remote video element not found!');
+      // Fallback to document.querySelector
+      const remoteVideo = document.querySelector('#remoteVideo') as HTMLVideoElement;
+      if (remoteVideo) {
+        // Check if this is the same stream to avoid unnecessary updates
+        if (remoteVideo.srcObject === stream) {
+          console.log('🔍 VideoCallComponent - Same stream (fallback), skipping update');
+          return;
+        }
+
+        remoteVideo.srcObject = stream;
+        // Handle video play with proper error handling
+        const playPromise = remoteVideo.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log('🔍 VideoCallComponent - Remote video playing successfully from:', peerId);
+              this.isRemoteVideoActive = true;
+            })
+            .catch(error => {
+              // Only log non-abort errors to reduce console spam
+              if (error.name !== 'AbortError') {
+                console.error('Error playing remote video:', error);
+              } else {
+                console.log('🔍 VideoCallComponent - Video play interrupted (this is normal)');
+              }
+            });
+        }
+        this.isRemoteVideoActive = true;
+        console.log('🔍 VideoCallComponent - Remote video displayed via fallback from:', peerId);
+      } else {
+        console.error('🔍 VideoCallComponent - No remote video element found anywhere!');
+      }
     }
   }
 

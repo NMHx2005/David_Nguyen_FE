@@ -116,11 +116,19 @@ export class SocketService {
             return;
         }
 
+        // Ensure user data is loaded from localStorage
+        this.authService.ensureUserLoaded();
+
         const token = this.authService.getToken();
         const user = this.authService.getCurrentUser();
 
+        console.log('🔍 SocketService.connect - Token:', token ? 'present' : 'missing');
+        console.log('🔍 SocketService.connect - User:', user ? 'present' : 'missing');
+
         if (!token || !user) {
             console.error('Cannot connect to socket: No authentication token or user');
+            console.error('🔍 SocketService.connect - Token:', token);
+            console.error('🔍 SocketService.connect - User:', user);
             return;
         }
 
