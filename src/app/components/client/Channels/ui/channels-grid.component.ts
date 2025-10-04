@@ -23,37 +23,68 @@ import { Channel, ChannelType } from '../../../../models/channel.model';
     <div class="channels-grid">
       <mat-card *ngFor="let channel of channels" class="channel-card">
         <mat-card-header>
-          <mat-icon mat-card-avatar class="channel-icon">
-            {{ getChannelTypeIcon(channel.type) }}
-          </mat-icon>
-          <mat-card-title>{{ channel.name }}</mat-card-title>
-          <mat-card-subtitle>
-            {{ getGroupName(channel.groupId) }}
-          </mat-card-subtitle>
+          <div class="channel-header">
+            <mat-icon mat-card-avatar class="channel-icon">
+              {{ getChannelTypeIcon(channel.type) }}
+            </mat-icon>
+            <div class="channel-title-section">
+              <mat-card-title>{{ channel.name }}</mat-card-title>
+              <mat-card-subtitle>
+                {{ getGroupName(channel.groupId) }}
+              </mat-card-subtitle>
+            </div>
+            <div class="channel-badges">
+              <mat-chip [ngClass]="'type-' + channel.type" class="type-badge">
+                {{ channel.type | titlecase }}
+              </mat-chip>
+              <mat-chip *ngIf="channel.isPrivate" class="privacy-badge private">
+                <mat-icon>lock</mat-icon>
+                Private
+              </mat-chip>
+              <mat-chip *ngIf="!channel.isPrivate" class="privacy-badge public">
+                <mat-icon>public</mat-icon>
+                Public
+              </mat-chip>
+            </div>
+          </div>
         </mat-card-header>
         
         <mat-card-content>
-          <p class="channel-description">{{ channel.description || 'No description' }}</p>
+          <p class="channel-description">{{ channel.description || 'No description available' }}</p>
           
           <div class="channel-meta">
             <div class="meta-item">
               <mat-icon>group</mat-icon>
-              <span>{{ channel.memberCount || (channel.members ? channel.members.length : 0) }} members</span>
+              <span>{{ channel.memberCount || 0 }} members</span>
             </div>
             
             <div class="meta-item">
               <mat-icon>schedule</mat-icon>
               <span>{{ channel.createdAt | date:'shortDate' }}</span>
             </div>
+
+            <div class="meta-item" *ngIf="channel.settings && channel.settings.slowMode > 0">
+              <mat-icon>timer</mat-icon>
+              <span>Slow mode: {{ channel.settings.slowMode }}s</span>
+            </div>
           </div>
-          
-          <div class="channel-tags">
-            <mat-chip [ngClass]="'type-' + channel.type">
-              {{ channel.type | titlecase }}
-            </mat-chip>
-            <mat-chip *ngIf="channel.maxMembers" class="limit-chip">
-              Max: {{ channel.maxMembers }}
-            </mat-chip>
+
+          <!-- Channel Settings -->
+          <div class="channel-settings" *ngIf="channel.settings">
+            <div class="settings-grid">
+              <div class="setting-item" *ngIf="channel.settings.requireApproval">
+                <mat-icon class="setting-icon">verified_user</mat-icon>
+                <span>Requires Approval</span>
+              </div>
+              <div class="setting-item" *ngIf="channel.settings.allowReactions">
+                <mat-icon class="setting-icon">emoji_emotions</mat-icon>
+                <span>Reactions Enabled</span>
+              </div>
+              <div class="setting-item" *ngIf="channel.settings.allowPolls">
+                <mat-icon class="setting-icon">poll</mat-icon>
+                <span>Polls Enabled</span>
+              </div>
+            </div>
           </div>
         </mat-card-content>
         
@@ -103,6 +134,24 @@ import { Channel, ChannelType } from '../../../../models/channel.model';
       box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
     }
 
+    .channel-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      width: 100%;
+    }
+
+    .channel-title-section {
+      flex: 1;
+    }
+
+    .channel-badges {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-end;
+    }
+
     .channel-icon {
       font-size: 32px;
       color: #667eea;
@@ -143,6 +192,12 @@ import { Channel, ChannelType } from '../../../../models/channel.model';
       flex-wrap: wrap;
     }
 
+    .type-badge {
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
     .type-text {
       background: #e3f2fd !important;
       color: #1976d2 !important;
@@ -156,6 +211,59 @@ import { Channel, ChannelType } from '../../../../models/channel.model';
     .type-video {
       background: #fce4ec !important;
       color: #c2185b !important;
+    }
+
+    .privacy-badge {
+      font-size: 0.75rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .privacy-badge.private {
+      background: #fce4ec !important;
+      color: #c2185b !important;
+    }
+
+    .privacy-badge.public {
+      background: #e8f5e8 !important;
+      color: #2e7d32 !important;
+    }
+
+    .privacy-badge mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+    }
+
+    .channel-settings {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+
+    .settings-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .setting-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    .setting-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      color: #667eea;
     }
 
     .limit-chip {
@@ -236,7 +344,11 @@ export class ChannelsGridComponent {
   }
 
   canJoinChannel(channel: Channel): boolean {
-    if (!this.currentUser) return false;
+    console.log('canJoinChannel called for:', channel.name, 'currentUser:', this.currentUser);
+    if (!this.currentUser) {
+      console.log('❌ currentUser is null/undefined - disabling join button');
+      return false;
+    }
 
     // Check if user is already a member
     if (this.isChannelMember(channel)) return false;
@@ -248,7 +360,28 @@ export class ChannelsGridComponent {
 
     // Check if user is a member of the group
     const group = this.groups.find(g => g.id === channel.groupId);
-    if (!group || !Array.isArray(group.members) || !group.members.includes(this.currentUser.id)) {
+    if (!group) {
+      return false;
+    }
+
+    // Check if user is explicitly a member OR is the creator of the group
+    const isExplicitMember = Array.isArray(group.members) &&
+      group.members.some((member: any) => member.userId === this.currentUser.id);
+    const isCreator = group.createdBy === this.currentUser.id;
+
+    // Debug log to see what's happening
+    console.log('Debug canJoinChannel:', {
+      channelName: channel.name,
+      currentUserId: this.currentUser.id,
+      groupName: group.name,
+      groupCreatedBy: group.createdBy,
+      groupMembers: group.members,
+      isExplicitMember,
+      isCreator,
+      canJoin: isExplicitMember || isCreator
+    });
+
+    if (!isExplicitMember && !isCreator) {
       return false;
     }
 

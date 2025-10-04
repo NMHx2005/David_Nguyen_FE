@@ -4,21 +4,22 @@ import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 
 export interface ChannelStats {
-    totalChannels: number;
-    textChannels: number;
-    voiceChannels: number;
-    videoChannels: number;
+  totalChannels: number;
+  activeChannels: number;
+  textChannels: number;
+  voiceChannels: number;
+  videoChannels: number;
 }
 
 @Component({
-    selector: 'app-channels-stats',
-    standalone: true,
-    imports: [
-        CommonModule,
-        MatCardModule,
-        MatIconModule
-    ],
-    template: `
+  selector: 'app-channels-stats',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatCardModule,
+    MatIconModule
+  ],
+  template: `
     <div class="stats-grid">
       <mat-card class="stat-card">
         <div class="stat-content">
@@ -67,9 +68,21 @@ export interface ChannelStats {
           </div>
         </div>
       </mat-card>
+
+      <mat-card class="stat-card">
+        <div class="stat-content">
+          <div class="stat-icon-container">
+            <mat-icon class="stat-icon">check_circle</mat-icon>
+          </div>
+          <div class="stat-details">
+            <h3>{{ stats.activeChannels }}</h3>
+            <p>Active Channels</p>
+          </div>
+        </div>
+      </mat-card>
     </div>
   `,
-    styles: [`
+  styles: [`
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -131,12 +144,13 @@ export interface ChannelStats {
   `]
 })
 export class ChannelsStatsComponent {
-    @Input() stats: ChannelStats = {
-        totalChannels: 0,
-        textChannels: 0,
-        voiceChannels: 0,
-        videoChannels: 0
-    };
+  @Input() stats: ChannelStats = {
+    totalChannels: 0,
+    activeChannels: 0,
+    textChannels: 0,
+    voiceChannels: 0,
+    videoChannels: 0
+  };
 
-    constructor() { }
+  constructor() { }
 }

@@ -8,27 +8,30 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
+import { ThemeToggleComponent } from '../../ThemeToggle/theme-toggle.component';
+import { User } from '../../../../models/user.model';
 
 export interface Notification {
-    icon: string;
-    text: string;
+  icon: string;
+  text: string;
 }
 
 @Component({
-    selector: 'app-client-header',
-    standalone: true,
-    imports: [
-        CommonModule,
-        RouterModule,
-        MatToolbarModule,
-        MatButtonModule,
-        MatIconModule,
-        MatMenuModule,
-        MatBadgeModule,
-        MatTooltipModule,
-        MatDividerModule
-    ],
-    template: `
+  selector: 'app-client-header',
+  standalone: true,
+  imports: [
+    CommonModule,
+    RouterModule,
+    MatToolbarModule,
+    MatButtonModule,
+    MatIconModule,
+    MatMenuModule,
+    MatBadgeModule,
+    MatTooltipModule,
+    MatDividerModule,
+    ThemeToggleComponent
+  ],
+  template: `
     <mat-toolbar class="client-header">
       <div class="header-content">
         <div class="header-left">
@@ -54,6 +57,8 @@ export interface Notification {
         </nav>
         
         <div class="header-right">
+          <app-theme-toggle></app-theme-toggle>
+          
           <button mat-icon-button [matMenuTriggerFor]="notificationsMenu" class="notification-btn" matTooltip="Notifications">
             <mat-icon [matBadge]="notificationCount" matBadgeColor="warn">notifications</mat-icon>
           </button>
@@ -69,7 +74,15 @@ export interface Notification {
           </mat-menu>
           
           <button mat-icon-button [matMenuTriggerFor]="userMenu" class="user-btn" matTooltip="User options">
-            <mat-icon>account_circle</mat-icon>
+            <!-- Avatar Image or Default Icon -->
+            <div class="user-avatar">
+              <img *ngIf="currentUser?.avatarUrl && !avatarError" 
+                   [src]="currentUser?.avatarUrl" 
+                   [alt]="currentUser?.username"
+                   class="avatar-image"
+                   (error)="onAvatarError()">
+              <mat-icon *ngIf="!currentUser?.avatarUrl || avatarError" class="default-avatar-icon">account_circle</mat-icon>
+            </div>
           </button>
           <mat-menu #userMenu="matMenu">
             <button mat-menu-item routerLink="/profile" matTooltip="View profile">
@@ -90,7 +103,7 @@ export interface Notification {
       </div>
     </mat-toolbar>
   `,
-    styles: [`
+  styles: [`
     .client-header {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
@@ -157,6 +170,30 @@ export interface Notification {
       background: rgba(255, 255, 255, 0.1);
     }
 
+    .user-avatar {
+      width: 24px;
+      height: 24px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .avatar-image {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .default-avatar-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: white;
+    }
+
     .mat-menu-item mat-icon {
       margin-right: 12px;
       color: #666;
@@ -178,12 +215,19 @@ export interface Notification {
   `]
 })
 export class ClientHeaderComponent {
-    @Input() notificationCount: number = 0;
-    @Input() notifications: Notification[] = [];
+  @Input() notificationCount: number = 0;
+  @Input() notifications: Notification[] = [];
+  @Input() currentUser: User | null = null;
 
-    @Output() logout = new EventEmitter<void>();
+  @Output() logout = new EventEmitter<void>();
 
-    onLogout(): void {
-        this.logout.emit();
-    }
+  avatarError: boolean = false;
+
+  onLogout(): void {
+    this.logout.emit();
+  }
+
+  onAvatarError(): void {
+    this.avatarError = true;
+  }
 }

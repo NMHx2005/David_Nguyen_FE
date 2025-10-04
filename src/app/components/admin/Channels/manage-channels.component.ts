@@ -8,15 +8,17 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { Subject, takeUntil } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
-import { ChannelsManagementService, ChannelStats, ChannelFilters } from './services/channels-management.service';
+import { ChannelService } from '../../../services/channel.service';
+import { ChannelStats, ChannelFilters, PaginationInfo } from '../../../models/channel.model';
+import { GroupService } from '../../../services/group.service';
 import { ChannelsStatsComponent } from './ui/channels-stats.component';
 import { ChannelsFiltersComponent } from './ui/channels-filters.component';
 import { ChannelsTableComponent } from './ui/channels-table.component';
 import { CreateChannelDialogComponent } from './ui/create-channel-dialog.component';
 import { BanUserDialogComponent } from '../Users/ui/ban-user-dialog.component';
-import { User } from '../../../models/user.model';
+import { User, UserRole } from '../../../models/user.model';
 import { Group } from '../../../models/group.model';
-import { Channel } from '../../../models/channel.model';
+import { Channel, ChannelType } from '../../../models/channel.model';
 
 @Component({
     selector: 'app-manage-channels',
@@ -31,7 +33,8 @@ import { Channel } from '../../../models/channel.model';
         MatSnackBarModule,
         ChannelsStatsComponent,
         ChannelsFiltersComponent,
-        ChannelsTableComponent
+        ChannelsTableComponent,
+        CreateChannelDialogComponent
     ],
     template: `
       <div class="manage-channels-container">
@@ -69,13 +72,16 @@ import { Channel } from '../../../models/channel.model';
 
         <!-- Channels Table -->
         <app-channels-table 
-          [channels]="filteredChannels"
+          [channels]="channels"
           [currentUser]="currentUser"
           [groups]="groups"
+          [pagination]="pagination"
+          [loading]="loading"
           (onViewChannel)="viewChannel($event)"
           (onEditChannel)="editChannel($event)"
           (onBanUser)="openBanUserDialog($event)"
-          (onDeleteChannel)="deleteChannel($event)">
+          (onDeleteChannel)="deleteChannel($event)"
+          (onPageChange)="onPageChange($event)">
         </app-channels-table>
       </div>
   `,
@@ -128,9 +134,10 @@ import { Channel } from '../../../models/channel.model';
   `]
 })
 export class ManageChannelsComponent implements OnInit, OnDestroy {
-    filteredChannels: Channel[] = [];
+    channels: Channel[] = [];
     statsData: ChannelStats = {
         totalChannels: 0,
+        activeChannels: 0,
         textChannels: 0,
         voiceChannels: 0,
         videoChannels: 0
@@ -138,16 +145,31 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
     filters: ChannelFilters = {
         searchTerm: '',
         groupId: '',
-        type: ''
+        channelType: 'all',
+        isActive: 'all',
+        sortBy: 'name',
+        sortOrder: 'asc',
+        page: 1,
+        limit: 10
     };
     groups: Group[] = [];
     currentUser: User | null = null;
+    loading: boolean = false;
+    pagination: PaginationInfo = {
+        page: 1,
+        limit: 10,
+        total: 0,
+        pages: 0,
+        hasNext: false,
+        hasPrev: false
+    };
 
     private destroy$ = new Subject<void>();
 
     constructor(
         private authService: AuthService,
-        private channelsManagementService: ChannelsManagementService,
+        private channelService: ChannelService,
+        private groupService: GroupService,
         private dialog: MatDialog,
         private router: Router,
         private snackBar: MatSnackBar
@@ -167,34 +189,173 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
      * Subscribe to service observables
      */
     private subscribeToServices(): void {
-        // Subscribe to channels data
-        this.channelsManagementService.filteredChannels$
-            .pipe(takeUntil(this.destroy$))
-            .subscribe(channels => {
-                this.filteredChannels = channels;
-            });
+        // Load initial data
+        this.loadChannels();
+        this.loadGroups();
+    }
 
-        // Subscribe to statistics
-        this.channelsManagementService.stats$
-            .pipe(takeUntil(this.destroy$))
-            .subscribe(stats => {
-                this.statsData = stats;
-            });
+    /**
+     * Load channels from API with pagination
+     */
+    private loadChannels(): void {
+        this.loading = true;
 
-        // Subscribe to groups data
-        this.channelsManagementService.groups$
+        // Prepare query options
+        const queryOptions: any = {
+            page: this.filters.page || 1,
+            limit: this.filters.limit || 10,
+            sortBy: this.filters.sortBy,
+            sortOrder: this.filters.sortOrder
+        };
+
+        // Add filters if they exist
+        if (this.filters.searchTerm) {
+            queryOptions.search = this.filters.searchTerm;
+        }
+        if (this.filters.groupId && this.filters.groupId !== 'all') {
+            queryOptions.groupId = this.filters.groupId;
+        }
+        if (this.filters.channelType && this.filters.channelType !== 'all') {
+            queryOptions.channelType = this.filters.channelType;
+        }
+        if (this.filters.isActive !== 'all') {
+            queryOptions.isActive = this.filters.isActive;
+        }
+
+        this.channelService.getChannelsPaginated(queryOptions)
             .pipe(takeUntil(this.destroy$))
-            .subscribe(groups => {
-                this.groups = groups;
+            .subscribe({
+                next: (response: any) => {
+                    try {
+                        if (response && response.success && response.data) {
+                            // Map API channels to models
+                            const channels = response.data.channels.map((apiChannel: any) => this.mapApiChannelToModel(apiChannel));
+                            this.channels = channels;
+
+                            // Update pagination info
+                            this.pagination = {
+                                page: response.data.page,
+                                limit: response.data.limit,
+                                total: response.data.total,
+                                pages: response.data.pages,
+                                hasNext: response.data.page < response.data.pages,
+                                hasPrev: response.data.page > 1
+                            };
+
+                            // Update stats (we'll need to get total stats separately)
+                            this.updateStats();
+                            this.loading = false;
+                            console.log(`Loaded ${channels.length} channels (page ${this.pagination.page}/${this.pagination.pages})`);
+                        } else {
+                            console.warn('Invalid response format:', response);
+                            this.channels = [];
+                            this.updatePagination();
+                            this.updateStats();
+                            this.loading = false;
+                            this.snackBar.open(response?.message || 'Failed to load channels - invalid response', 'Close', {
+                                duration: 3000,
+                                panelClass: ['error-snackbar']
+                            });
+                        }
+                    } catch (mappingError) {
+                        console.error('Error mapping channel data:', mappingError);
+                        this.channels = [];
+                        this.updatePagination();
+                        this.updateStats();
+                        this.loading = false;
+                        this.snackBar.open('Error processing channel data', 'Close', {
+                            duration: 3000,
+                            panelClass: ['error-snackbar']
+                        });
+                    }
+                },
+                error: (error) => {
+                    console.error('Error loading channels:', error);
+                    this.channels = [];
+                    this.updatePagination();
+                    this.updateStats();
+                    this.loading = false;
+                    this.snackBar.open('Failed to load channels. Please check your connection.', 'Close', {
+                        duration: 5000,
+                        panelClass: ['error-snackbar']
+                    });
+                }
             });
+    }
+
+    /**
+     * Map API Channel to models Channel
+     */
+    private mapApiChannelToModel(apiChannel: any): Channel {
+        // Map type string to ChannelType enum
+        let channelType: ChannelType;
+        switch (apiChannel.type?.toLowerCase()) {
+            case 'text':
+                channelType = ChannelType.TEXT;
+                break;
+            case 'voice':
+                channelType = ChannelType.VOICE;
+                break;
+            case 'video':
+                channelType = ChannelType.VIDEO;
+                break;
+            default:
+                channelType = ChannelType.TEXT;
+        }
+
+        return {
+            id: apiChannel._id || apiChannel.id,
+            name: apiChannel.name || '',
+            description: apiChannel.description || '',
+            groupId: apiChannel.groupId || '',
+            type: channelType,
+            createdBy: apiChannel.createdBy || '',
+            members: apiChannel.members || [],
+            admins: apiChannel.admins || [],
+            bannedUsers: apiChannel.bannedUsers || [],
+            createdAt: apiChannel.createdAt ? new Date(apiChannel.createdAt) : new Date(),
+            updatedAt: apiChannel.updatedAt ? new Date(apiChannel.updatedAt) : new Date(),
+            isActive: apiChannel.isActive !== false,
+            isPrivate: apiChannel.isPrivate || false,
+            memberCount: apiChannel.memberCount || apiChannel.members?.length || 0,
+            maxMembers: apiChannel.maxMembers || 100,
+            settings: apiChannel.settings || {
+                slowMode: 0,
+                requireApproval: false,
+                allowReactions: true,
+                allowPolls: true
+            }
+        };
     }
 
     /**
      * Handle filters change
      */
     onFiltersChange(filters: ChannelFilters): void {
-        this.filters = filters;
-        this.channelsManagementService.setFilters(filters);
+        this.filters = { ...filters, page: 1 }; // Reset to page 1 when filters change
+        this.loadChannels();
+    }
+
+    /**
+     * Handle page change
+     */
+    onPageChange(page: number): void {
+        this.filters.page = page;
+        this.loadChannels();
+    }
+
+    /**
+     * Update pagination info
+     */
+    private updatePagination(): void {
+        this.pagination = {
+            page: this.filters.page || 1,
+            limit: this.filters.limit || 10,
+            total: 0,
+            pages: 0,
+            hasNext: false,
+            hasPrev: false
+        };
     }
 
     /**
@@ -214,20 +375,50 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
      * Create a new channel
      */
     async createChannel(channelData: Partial<Channel>): Promise<void> {
-        try {
-            const result = await this.channelsManagementService.createChannel(channelData, this.currentUser);
+        if (!this.currentUser) {
+            this.snackBar.open('Please login to create channels', 'Close', {
+                duration: 3000,
+                panelClass: ['error-snackbar']
+            });
+            return;
+        }
 
-            if (result.success) {
-                this.snackBar.open(result.message, 'Close', {
-                    duration: 3000,
-                    panelClass: ['success-snackbar']
+        try {
+            const channelCreateData = {
+                name: channelData.name!,
+                description: channelData.description || '',
+                groupId: channelData.groupId!,
+                type: channelData.type!,
+                isPrivate: false // Default to public
+            };
+
+            this.channelService.createChannel(channelCreateData)
+                .pipe(takeUntil(this.destroy$))
+                .subscribe({
+                    next: (response: any) => {
+                        if (response.success) {
+                            // Reload channels to get updated list
+                            this.loadChannels();
+
+                            this.snackBar.open('Channel created successfully', 'Close', {
+                                duration: 3000,
+                                panelClass: ['success-snackbar']
+                            });
+                        } else {
+                            this.snackBar.open(response.message || 'Failed to create channel', 'Close', {
+                                duration: 5000,
+                                panelClass: ['error-snackbar']
+                            });
+                        }
+                    },
+                    error: (error) => {
+                        console.error('Error creating channel:', error);
+                        this.snackBar.open('Failed to create channel. Please try again.', 'Close', {
+                            duration: 5000,
+                            panelClass: ['error-snackbar']
+                        });
+                    }
                 });
-            } else {
-                this.snackBar.open(result.message, 'Close', {
-                    duration: 5000,
-                    panelClass: ['error-snackbar']
-                });
-            }
         } catch (error) {
             console.error('Error creating channel:', error);
             this.snackBar.open('Failed to create channel. Please try again.', 'Close', {
@@ -241,7 +432,7 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
      * Check if current user can create channels
      */
     canCreateChannel(): boolean {
-        return this.channelsManagementService.canCreateChannel(this.currentUser);
+        return this.currentUser?.roles.includes(UserRole.GROUP_ADMIN) || this.currentUser?.roles.includes(UserRole.SUPER_ADMIN) || false;
     }
 
     /**
@@ -262,28 +453,41 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
      * Delete channel
      */
     async deleteChannel(channel: Channel): Promise<void> {
-        if (confirm(`Are you sure you want to delete the channel "${channel.name}"?`)) {
-            try {
-                const result = await this.channelsManagementService.deleteChannel(channel.id, this.currentUser);
+        if (!this.currentUser) {
+            this.snackBar.open('Please login to delete channels', 'Close', {
+                duration: 3000,
+                panelClass: ['error-snackbar']
+            });
+            return;
+        }
 
-                if (result.success) {
-                    this.snackBar.open(result.message, 'Close', {
-                        duration: 3000,
-                        panelClass: ['success-snackbar']
-                    });
-                } else {
-                    this.snackBar.open(result.message, 'Close', {
-                        duration: 5000,
-                        panelClass: ['error-snackbar']
-                    });
-                }
-            } catch (error) {
-                console.error('Error deleting channel:', error);
-                this.snackBar.open('Failed to delete channel. Please try again.', 'Close', {
-                    duration: 5000,
-                    panelClass: ['error-snackbar']
+        if (confirm(`Are you sure you want to delete the channel "${channel.name}"?`)) {
+            this.channelService.deleteChannel(channel.id)
+                .pipe(takeUntil(this.destroy$))
+                .subscribe({
+                    next: (response: any) => {
+                        if (response.success) {
+                            // Reload channels to get updated list
+                            this.loadChannels();
+                            this.snackBar.open('Channel deleted successfully', 'Close', {
+                                duration: 3000,
+                                panelClass: ['success-snackbar']
+                            });
+                        } else {
+                            this.snackBar.open(response.message || 'Failed to delete channel', 'Close', {
+                                duration: 5000,
+                                panelClass: ['error-snackbar']
+                            });
+                        }
+                    },
+                    error: (error) => {
+                        console.error('Error deleting channel:', error);
+                        this.snackBar.open('Failed to delete channel. Please try again.', 'Close', {
+                            duration: 5000,
+                            panelClass: ['error-snackbar']
+                        });
+                    }
                 });
-            }
         }
     }
 
@@ -291,23 +495,10 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
      * Open ban user dialog
      */
     openBanUserDialog(channel: Channel): void {
-        const availableUsers = this.channelsManagementService.getAvailableUsersForBan(channel);
-
-        if (availableUsers.length === 0) {
-            this.snackBar.open('No users available to ban from this channel.', 'Close', {
-                duration: 3000,
-                panelClass: ['warning-snackbar']
-            });
-            return;
-        }
-
-        const dialogRef = this.dialog.open(BanUserDialogComponent, {
-            width: '500px',
-            data: {
-                channelName: channel.name,
-                availableUsers: availableUsers,
-                onBan: (userId: string, reason: string) => this.banUserFromChannel(channel.id, userId, reason)
-            }
+        // For now, we'll show a simple message
+        this.snackBar.open('Ban user functionality will be implemented with UserService integration', 'Close', {
+            duration: 3000,
+            panelClass: ['info-snackbar']
         });
     }
 
@@ -315,26 +506,62 @@ export class ManageChannelsComponent implements OnInit, OnDestroy {
      * Ban user from channel
      */
     async banUserFromChannel(channelId: string, userId: string, reason: string): Promise<void> {
-        try {
-            const result = await this.channelsManagementService.banUserFromChannel(channelId, userId, reason, this.currentUser);
+        // This will be implemented with proper UserService integration
+        this.snackBar.open('Ban user functionality will be implemented with UserService integration', 'Close', {
+            duration: 3000,
+            panelClass: ['info-snackbar']
+        });
+    }
 
-            if (result.success) {
-                this.snackBar.open(result.message, 'Close', {
-                    duration: 3000,
-                    panelClass: ['success-snackbar']
-                });
-            } else {
-                this.snackBar.open(result.message, 'Close', {
-                    duration: 5000,
-                    panelClass: ['error-snackbar']
-                });
-            }
-        } catch (error) {
-            console.error('Error banning user:', error);
-            this.snackBar.open('Failed to ban user. Please try again.', 'Close', {
-                duration: 5000,
-                panelClass: ['error-snackbar']
+    /**
+     * Load groups from API
+     */
+    private loadGroups(): void {
+        this.groupService.getAllGroups({ limit: 1000 })
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+                next: (response: any) => {
+                    if (response.success && response.data?.groups) {
+                        // Map API groups to model groups
+                        this.groups = response.data.groups.map((apiGroup: any) => ({
+                            id: apiGroup._id || apiGroup.id,
+                            name: apiGroup.name || '',
+                            description: apiGroup.description || '',
+                            isPrivate: apiGroup.isPrivate || false,
+                            isActive: apiGroup.isActive !== false,
+                            members: apiGroup.members || [],
+                            admins: apiGroup.admins || [],
+                            createdBy: apiGroup.createdBy || '',
+                            createdAt: apiGroup.createdAt ? new Date(apiGroup.createdAt) : new Date(),
+                            updatedAt: apiGroup.updatedAt ? new Date(apiGroup.updatedAt) : new Date()
+                        }));
+                    } else {
+                        console.warn('Failed to load groups:', response.message);
+                        this.groups = [];
+                    }
+                },
+                error: (error) => {
+                    console.error('Error loading groups:', error);
+                    this.groups = [];
+                    this.snackBar.open('Failed to load groups. Using cached data.', 'Close', {
+                        duration: 3000,
+                        panelClass: ['warning-snackbar']
+                    });
+                }
             });
-        }
+    }
+
+
+    /**
+     * Update statistics
+     */
+    private updateStats(): void {
+        this.statsData = {
+            totalChannels: this.channels.length,
+            activeChannels: this.channels.filter(c => c.isActive).length,
+            textChannels: this.channels.filter(c => c.type === ChannelType.TEXT).length,
+            voiceChannels: this.channels.filter(c => c.type === ChannelType.VOICE).length,
+            videoChannels: this.channels.filter(c => c.type === ChannelType.VIDEO).length
+        };
     }
 }

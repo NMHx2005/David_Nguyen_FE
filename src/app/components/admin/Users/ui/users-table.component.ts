@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonModule } from '@angular/material/button';
@@ -9,6 +9,8 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatCardModule } from '@angular/material/card';
 import { MatPaginatorModule } from '@angular/material/paginator';
 import { User, UserRole } from '../../../../models/user.model';
+import { UserGroupsService } from '../services/user-groups.service';
+import { Subject, takeUntil } from 'rxjs';
 
 @Component({
   selector: 'app-users-table',
@@ -306,7 +308,7 @@ import { User, UserRole } from '../../../../models/user.model';
     }
   `]
 })
-export class UsersTableComponent {
+export class UsersTableComponent implements OnInit, OnDestroy {
   @Input() users: User[] = [];
   @Input() currentUser: User | null = null;
   @Input() selectedUsers: string[] = [];
@@ -322,13 +324,26 @@ export class UsersTableComponent {
 
   displayedColumns: string[] = ['select', 'user', 'role', 'groups', 'status', 'created', 'actions'];
 
+  private destroy$ = new Subject<void>();
+  private userGroupsService = inject(UserGroupsService);
+
   get paginatedUsers(): User[] {
     const startIndex = this.currentPage * this.pageSize;
     const endIndex = startIndex + this.pageSize;
     return this.users.slice(startIndex, endIndex);
   }
 
-  constructor() { }
+  ngOnInit(): void {
+    // Subscribe to groups updates
+    this.userGroupsService.groups$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 
   isAllSelected(): boolean {
     return this.paginatedUsers.length > 0 && this.selectedUsers.length === this.paginatedUsers.length;
@@ -367,9 +382,7 @@ export class UsersTableComponent {
   }
 
   getGroupName(groupId: string): string {
-    const groups = JSON.parse(localStorage.getItem('groups') || '[]');
-    const group = groups.find((g: any) => g.id === groupId);
-    return group ? group.name : `Group ${groupId}`;
+    return this.userGroupsService.getGroupName(groupId);
   }
 
   getRoleColor(role: UserRole): string {

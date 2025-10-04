@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { User, UserRole } from '../../models';
 import { Router } from '@angular/router';
+import { ApiService, LoginRequest, RegisterRequest } from '../../services/api.service';
 
 @Injectable({
   providedIn: 'root'
@@ -10,20 +11,46 @@ export class AuthService {
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
 
-  constructor(private router: Router) {
+  constructor(
+    private router: Router,
+    private apiService: ApiService
+  ) {
     this.loadUserFromStorage();
   }
 
   private loadUserFromStorage(): void {
-    const userData = localStorage.getItem('currentUser');
+    const userData = localStorage.getItem('current_user');
+    const authToken = localStorage.getItem('auth_token');
+
+    console.log('🔍 AuthService.loadUserFromStorage - localStorage check:', {
+      current_user: userData ? 'exists' : null,
+      auth_token: authToken ? 'exists' : null
+    });
+
     if (userData) {
       try {
         const user = JSON.parse(userData);
+
+        // Add token from auth_token if user doesn't have it
+        if (!user.token && authToken) {
+          user.token = authToken;
+          console.log('🔍 AuthService.loadUserFromStorage - Added token to user from auth_token');
+        }
+
+        console.log('🔍 AuthService.loadUserFromStorage - Final user object:', {
+          id: user.id,
+          username: user.username,
+          hasToken: !!user.token,
+          tokenLength: user.token ? user.token.length : 0
+        });
+
         this.currentUserSubject.next(user);
       } catch (error) {
         console.error('Error parsing user data from storage:', error);
         this.clearUserData();
       }
+    } else {
+      console.log('🔍 AuthService.loadUserFromStorage - No user data in localStorage');
     }
   }
 
@@ -34,7 +61,7 @@ export class AuthService {
    */
   public ensureUserLoaded(): boolean {
     if (this.currentUserSubject.value) return true;
-    const userData = localStorage.getItem('currentUser');
+    const userData = localStorage.getItem('current_user');
     if (!userData) return false;
     try {
       const user = JSON.parse(userData);
@@ -48,167 +75,140 @@ export class AuthService {
   }
 
   async login(username: string, password: string): Promise<boolean> {
-    // Mock authentication for Phase 1
-    if (username === 'super' && password === '123') {
-      const user: User = {
-        id: '1',
-        username: 'super',
-        email: 'super@example.com',
-        roles: [UserRole.SUPER_ADMIN],
-        groups: ['1', '2'],
-        createdAt: new Date('2025-01-01'),
-        updatedAt: new Date(),
-        isActive: true
-      };
-
-      this.setUserData(user);
-      return true;
-    } else if (username === 'admin' && password === '123') {
-      const user: User = {
-        id: '2',
-        username: 'admin',
-        email: 'admin@example.com',
-        roles: [UserRole.GROUP_ADMIN],
-        groups: ['1', '3'],
-        createdAt: new Date('2025-01-15'),
-        updatedAt: new Date(),
-        isActive: true
-      };
-
-      this.setUserData(user);
-      return true;
-    } else if (username === 'user' && password === '123') {
-      const user: User = {
-        id: '3',
-        username: 'user',
-        email: 'user@example.com',
-        roles: [UserRole.USER],
-        groups: ['1'],
-        createdAt: new Date('2025-02-01'),
-        updatedAt: new Date(),
-        isActive: true
-      };
-
-      this.setUserData(user);
-      return true;
-    }
-
-    // Try local registered users (Phase 1 mock auth)
     try {
-      const users = this.getStoredUsers();
-      console.log('Stored users:', users); // Debug log
+      console.log('🔍 AuthService.login - Attempting login with backend API');
 
-      const existing = users.find(u => u.username === username || u.email === username);
-      console.log('Found user:', existing); // Debug log
+      // Call backend API for authentication
+      const response = await this.apiService.login({ username, password }).toPromise();
 
-      if (existing) {
-        const isValidPassword = this.validateUserPassword(existing.id, password);
-        console.log('Password valid:', isValidPassword); // Debug log
+      if (response && response.success && response.data) {
+        console.log('🔍 AuthService.login - Backend response:', response);
 
-        if (isValidPassword) {
-          this.setUserData(existing);
-          return true;
-        }
+        // Convert backend user data to frontend User model
+        const user: User = {
+          id: response.data.user._id,
+          username: response.data.user.username,
+          email: response.data.user.email,
+          token: response.data.accessToken,
+          roles: response.data.user.roles.map((role: string) => {
+            switch (role) {
+              case 'super_admin': return UserRole.SUPER_ADMIN;
+              case 'group_admin': return UserRole.GROUP_ADMIN;
+              case 'user': return UserRole.USER;
+              default: return UserRole.USER;
+            }
+          }),
+          groups: response.data.user.groups || [],
+          createdAt: new Date(response.data.user.createdAt),
+          updatedAt: new Date(response.data.user.updatedAt),
+          isActive: response.data.user.isActive
+        };
+
+        console.log('🔍 AuthService.login - Converted user object:', user);
+
+        // Store tokens separately for refresh functionality
+        localStorage.setItem('auth_token', response.data.accessToken);
+        localStorage.setItem('refresh_token', response.data.refreshToken);
+
+        this.setUserData(user);
+        return true;
+      } else {
+        console.error('🔍 AuthService.login - Login failed:', response);
+        return false;
       }
-    } catch (e) {
-      console.error('Local login error:', e);
+    } catch (error) {
+      console.error('🔍 AuthService.login - Login error:', error);
+      return false;
     }
-    return false;
   }
 
   async register(userData: { username: string; email: string; password: string }): Promise<boolean> {
     try {
-      // Check if username already exists
-      const isUnique = await this.checkUsernameUnique(userData.username);
-      if (!isUnique) {
-        return false;
-      }
+      console.log('🔍 AuthService.register - Attempting registration with backend API');
 
-      // Create new user (mock implementation for Phase 1)
-      const newUser: User = {
-        id: Date.now().toString(),
+      // Call backend API for registration
+      const response = await this.apiService.register({
         username: userData.username,
         email: userData.email,
-        roles: [UserRole.USER],
-        groups: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isActive: true
-      };
+        password: userData.password,
+        confirmPassword: userData.password
+      }).toPromise();
 
-      // Store user in localStorage (mock database)
-      const existingUsers = this.getStoredUsers();
-      existingUsers.push(newUser);
-      localStorage.setItem('users', JSON.stringify(existingUsers));
-      // Store mock credential separately
-      this.storeUserPassword(newUser.id, userData.password);
+      if (response && response.success && response.data) {
+        console.log('🔍 AuthService.register - Backend response:', response);
 
-      return true;
+        // Convert backend user data to frontend User model
+        const user: User = {
+          id: response.data.user._id,
+          username: response.data.user.username,
+          email: response.data.user.email,
+          token: response.data.accessToken,
+          roles: response.data.user.roles.map((role: string) => {
+            switch (role) {
+              case 'super_admin': return UserRole.SUPER_ADMIN;
+              case 'group_admin': return UserRole.GROUP_ADMIN;
+              case 'user': return UserRole.USER;
+              default: return UserRole.USER;
+            }
+          }),
+          groups: response.data.user.groups || [],
+          createdAt: new Date(response.data.user.createdAt),
+          updatedAt: new Date(response.data.user.updatedAt),
+          isActive: response.data.user.isActive
+        };
+
+        console.log('🔍 AuthService.register - Converted user object:', user);
+
+        // Store tokens separately for refresh functionality
+        localStorage.setItem('auth_token', response.data.accessToken);
+        localStorage.setItem('refresh_token', response.data.refreshToken);
+
+        this.setUserData(user);
+        return true;
+      } else {
+        console.error('🔍 AuthService.register - Registration failed:', response);
+        return false;
+      }
     } catch (error) {
-      console.error('Registration error:', error);
+      console.error('🔍 AuthService.register - Registration error:', error);
       return false;
     }
   }
 
   async checkUsernameUnique(username: string): Promise<boolean> {
-    try {
-      const storedUsers = this.getStoredUsers();
-      const existingUser = storedUsers.find(user => user.username === username);
-      return !existingUser;
-    } catch (error) {
-      console.error('Username check error:', error);
-      return false;
-    }
-  }
-
-  private getStoredUsers(): User[] {
-    try {
-      const usersData = localStorage.getItem('users');
-      return usersData ? JSON.parse(usersData) : [];
-    } catch (error) {
-      console.error('Error parsing users from storage:', error);
-      return [];
-    }
+    // For now, we'll assume username is unique since backend will handle validation
+    // In a real implementation, you might want to add a specific API endpoint for this
+    return true;
   }
 
   private setUserData(user: User): void {
-    localStorage.setItem('currentUser', JSON.stringify(user));
+    localStorage.setItem('current_user', JSON.stringify(user));
     this.currentUserSubject.next(user);
   }
 
-  /**
-   * Store a mock password for a user in localStorage (Phase 1 only).
-   */
-  private storeUserPassword(userId: string, password: string): void {
-    try {
-      localStorage.setItem(`cred_${userId}`, JSON.stringify({ password }));
-    } catch (e) {
-      console.error('Failed to store user credential', e);
-    }
-  }
-
-  /**
-   * Validate provided password against stored mock credential.
-   */
-  private validateUserPassword(userId: string, password: string): boolean {
-    try {
-      const raw = localStorage.getItem(`cred_${userId}`);
-      if (!raw) return false;
-      const parsed = JSON.parse(raw);
-      return parsed?.password === password;
-    } catch (e) {
-      console.error('Failed to validate user credential', e);
-      return false;
-    }
-  }
 
   private clearUserData(): void {
-    localStorage.removeItem('currentUser');
+    localStorage.removeItem('current_user');
     this.currentUserSubject.next(null);
   }
 
-  logout(): void {
-    this.clearUserData();
+  async logout(): Promise<void> {
+    try {
+      console.log('🔍 AuthService.logout - Attempting logout with backend API');
+
+      // Call backend API for logout
+      await this.apiService.logout().toPromise();
+
+      console.log('🔍 AuthService.logout - Backend logout successful');
+    } catch (error) {
+      console.error('🔍 AuthService.logout - Backend logout error:', error);
+      // Continue with local logout even if backend fails
+    } finally {
+      // Always clear local data
+      this.clearUserData();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('refresh_token');
+    }
   }
 
   isAuthenticated(): boolean {
@@ -217,6 +217,68 @@ export class AuthService {
 
   getCurrentUser(): User | null {
     return this.currentUserSubject.value;
+  }
+
+  /**
+   * Refresh access token using refresh token
+   */
+  async refreshToken(): Promise<boolean> {
+    try {
+      const refreshToken = localStorage.getItem('refresh_token');
+      if (!refreshToken) {
+        console.log('🔍 AuthService.refreshToken - No refresh token found');
+        return false;
+      }
+
+      console.log('🔍 AuthService.refreshToken - Attempting to refresh token');
+
+      const response = await this.apiService.refreshToken().toPromise();
+
+      if (response && response.success && response.data) {
+        console.log('🔍 AuthService.refreshToken - Token refreshed successfully');
+
+        // Update stored tokens
+        localStorage.setItem('auth_token', response.data.accessToken);
+
+        // Update current user token
+        const currentUser = this.getCurrentUser();
+        if (currentUser) {
+          currentUser.token = response.data.accessToken;
+          this.setUserData(currentUser);
+        }
+
+        return true;
+      } else {
+        console.error('🔍 AuthService.refreshToken - Token refresh failed:', response);
+        return false;
+      }
+    } catch (error) {
+      console.error('🔍 AuthService.refreshToken - Token refresh error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get authentication headers for API requests
+   */
+  getAuthHeaders(): { [key: string]: string } {
+    const user = this.getCurrentUser();
+    console.log('🔍 AuthService.getAuthHeaders - Current user:', user);
+    console.log('🔍 AuthService.getAuthHeaders - User token:', user?.token);
+
+    if (user && user.token) {
+      const headers = {
+        'Authorization': `Bearer ${user.token}`,
+        'Content-Type': 'application/json'
+      };
+      console.log('🔍 AuthService.getAuthHeaders - Headers with token:', headers);
+      return headers;
+    }
+
+    console.log('🔍 AuthService.getAuthHeaders - No token, returning headers without auth');
+    return {
+      'Content-Type': 'application/json'
+    };
   }
 
   hasRole(role: UserRole): boolean {

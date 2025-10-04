@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -7,6 +7,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { Channel, ChannelType } from '../../../../models/channel.model';
 import { Group } from '../../../../models/group.model';
 
@@ -25,7 +26,8 @@ import { Group } from '../../../../models/group.model';
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
-    MatSelectModule
+    MatSelectModule,
+    MatCheckboxModule
   ],
   template: `
     <mat-card class="form-card">
@@ -117,6 +119,48 @@ import { Group } from '../../../../models/group.model';
                 <mat-option [value]="false">Inactive</mat-option>
               </mat-select>
             </mat-form-field>
+
+            <mat-form-field appearance="outline">
+              <mat-label>Privacy</mat-label>
+              <mat-select formControlName="isPrivate">
+                <mat-option [value]="false">Public</mat-option>
+                <mat-option [value]="true">Private</mat-option>
+              </mat-select>
+            </mat-form-field>
+          </div>
+
+          <!-- Settings Section -->
+          <div class="settings-section" *ngIf="isEditMode">
+            <h3>Channel Settings</h3>
+            <div class="settings-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>Slow Mode (seconds)</mat-label>
+                <input matInput 
+                       type="number" 
+                       formControlName="slowMode" 
+                       min="0" 
+                       max="3600"
+                       placeholder="Delay between messages">
+                <mat-error *ngIf="channelForm.get('slowMode')?.hasError('min')">
+                  Slow mode must be at least 0 seconds
+                </mat-error>
+                <mat-error *ngIf="channelForm.get('slowMode')?.hasError('max')">
+                  Slow mode must not exceed 3600 seconds
+                </mat-error>
+              </mat-form-field>
+
+              <div class="checkbox-group">
+                <mat-checkbox formControlName="requireApproval">
+                  Require approval for new members
+                </mat-checkbox>
+                <mat-checkbox formControlName="allowReactions">
+                  Allow reactions on messages
+                </mat-checkbox>
+                <mat-checkbox formControlName="allowPolls">
+                  Allow polls in channel
+                </mat-checkbox>
+              </div>
+            </div>
           </div>
 
           <div class="form-actions">
@@ -164,8 +208,46 @@ import { Group } from '../../../../models/group.model';
       min-height: 80px;
     }
 
+    .settings-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 2px solid #f0f0f0;
+    }
+
+    .settings-section h3 {
+      margin: 0 0 16px 0;
+      color: #333;
+      font-size: 1.2rem;
+      font-weight: 500;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .checkbox-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background-color: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .checkbox-group mat-checkbox {
+      margin: 0;
+    }
+
     @media (max-width: 768px) {
       .form-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .settings-grid {
         grid-template-columns: 1fr;
         gap: 12px;
       }
@@ -180,7 +262,7 @@ import { Group } from '../../../../models/group.model';
     }
   `]
 })
-export class ChannelFormComponent implements OnInit {
+export class ChannelFormComponent implements OnInit, OnChanges {
   @Input() channel: Channel | null = null;
   @Input() groups: Group[] = [];
   @Input() isEditMode: boolean = true;
@@ -201,6 +283,19 @@ export class ChannelFormComponent implements OnInit {
     }
   }
 
+  ngOnChanges(changes: SimpleChanges): void {
+    // Check if channel input has changed
+    if (changes['channel'] && this.channel && this.isEditMode && this.channelForm) {
+      console.log('Channel data changed, populating form:', this.channel);
+      this.populateForm();
+    }
+
+    // Also check if groups changed
+    if (changes['groups'] && this.groups && this.groups.length > 0) {
+      console.log('Groups loaded:', this.groups.length);
+    }
+  }
+
   private initializeForm(): void {
     this.channelForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(50)]],
@@ -208,20 +303,36 @@ export class ChannelFormComponent implements OnInit {
       groupId: ['', Validators.required],
       type: [ChannelType.TEXT, Validators.required],
       maxMembers: [100, [Validators.min(1), Validators.max(1000)]],
-      isActive: [true]
+      isActive: [true],
+      isPrivate: [false],
+      slowMode: [0, [Validators.min(0), Validators.max(3600)]],
+      requireApproval: [false],
+      allowReactions: [true],
+      allowPolls: [true]
     });
   }
 
   private populateForm(): void {
     if (this.channel) {
-      this.channelForm.patchValue({
+      console.log('Populating form with channel data:', this.channel);
+      const formData = {
         name: this.channel.name,
         description: this.channel.description || '',
         groupId: this.channel.groupId,
         type: this.channel.type,
         maxMembers: this.channel.maxMembers || 100,
-        isActive: this.channel.isActive
-      });
+        isActive: this.channel.isActive,
+        isPrivate: this.channel.isPrivate,
+        slowMode: this.channel.settings?.slowMode || 0,
+        requireApproval: this.channel.settings?.requireApproval || false,
+        allowReactions: this.channel.settings?.allowReactions || true,
+        allowPolls: this.channel.settings?.allowPolls || true
+      };
+      console.log('Form data to populate:', formData);
+      this.channelForm.patchValue(formData);
+      console.log('Form after population:', this.channelForm.value);
+    } else {
+      console.log('No channel data to populate form');
     }
   }
 }

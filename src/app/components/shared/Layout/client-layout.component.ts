@@ -1,7 +1,9 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { AuthService } from '../../auth/auth.service';
+import { Subject, takeUntil } from 'rxjs';
+import { AuthService } from '../../../components/auth/auth.service';
+import { User } from '../../../models/user.model';
 import { ClientHeaderComponent } from './ui/client-header.component';
 import { ClientFooterComponent } from './ui/client-footer.component';
 
@@ -20,6 +22,7 @@ import { ClientFooterComponent } from './ui/client-footer.component';
       <app-client-header
         [notificationCount]="notificationCount"
         [notifications]="notifications"
+        [currentUser]="currentUser"
         (logout)="onLogout()">
       </app-client-header>
 
@@ -97,10 +100,13 @@ import { ClientFooterComponent } from './ui/client-footer.component';
     }
   `]
 })
-export class ClientLayoutComponent {
+export class ClientLayoutComponent implements OnInit, OnDestroy {
   @Input() pageTitle?: string;
   @Input() pageDescription?: string;
   @Input() notificationCount: number = 0;
+
+  private destroy$ = new Subject<void>();
+  currentUser: User | null = null;
 
   // Mock notifications for demonstration
   notifications: { icon: string; text: string }[] = [
@@ -110,8 +116,43 @@ export class ClientLayoutComponent {
 
   constructor(private authService: AuthService, private router: Router) { }
 
-  onLogout(): void {
-    this.authService.logout();
-    this.router.navigate(['/login']);
+  ngOnInit(): void {
+    this.authService.currentUser$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(user => {
+        this.currentUser = user ? this.convertAuthUserToModelUser(user) : null;
+      });
+  }
+
+  private convertAuthUserToModelUser(authUser: any): User {
+    return {
+      id: authUser._id || authUser.id,
+      username: authUser.username,
+      email: authUser.email,
+      roles: authUser.roles || [],
+      role: authUser.role,
+      groups: authUser.groups || [],
+      createdAt: authUser.createdAt,
+      updatedAt: authUser.updatedAt,
+      avatarUrl: authUser.avatar || authUser.avatarUrl,
+      isActive: authUser.isActive
+    };
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  async onLogout(): Promise<void> {
+    try {
+      await this.authService.logout();
+      console.log('Logout successful');
+      this.router.navigate(['/login']);
+    } catch (error: any) {
+      console.error('Logout error:', error);
+      // Navigate to login even if logout request fails
+      this.router.navigate(['/login']);
+    }
   }
 }

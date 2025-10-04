@@ -21,7 +21,15 @@ import { User } from '../../../../models/user.model';
       <!-- Profile Header -->
       <div class="profile-header">
         <div class="header-content">
-          <mat-icon class="profile-avatar">account_circle</mat-icon>
+          <!-- Avatar Image or Default Icon -->
+          <div class="profile-avatar">
+            <img *ngIf="currentUser?.avatarUrl" 
+                 [src]="currentUser?.avatarUrl" 
+                 [alt]="currentUser?.username"
+                 class="avatar-image"
+                 (error)="onAvatarError()">
+            <mat-icon *ngIf="!currentUser?.avatarUrl || avatarError" class="default-avatar-icon">account_circle</mat-icon>
+          </div>
           <h1>{{ currentUser?.username || 'User' }}</h1>
           <p>{{ getRoleDisplayName() }}</p>
         </div>
@@ -61,6 +69,23 @@ import { User } from '../../../../models/user.model';
     }
 
     .profile-avatar {
+      width: 64px;
+      height: 64px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .avatar-image {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .default-avatar-icon {
       font-size: 64px;
       width: 64px;
       height: 64px;
@@ -106,6 +131,11 @@ import { User } from '../../../../models/user.model';
       }
 
       .profile-avatar {
+        width: 48px;
+        height: 48px;
+      }
+
+      .default-avatar-icon {
         font-size: 48px;
         width: 48px;
         height: 48px;
@@ -123,11 +153,17 @@ export class ProfileHeaderComponent {
 
   @Output() editProfile = new EventEmitter<void>();
 
+  avatarError: boolean = false;
+
   getRoleDisplayName(): string {
     return this.roleDisplayName;
   }
 
   onEditProfile(): void {
     this.editProfile.emit();
+  }
+
+  onAvatarError(): void {
+    this.avatarError = true;
   }
 }

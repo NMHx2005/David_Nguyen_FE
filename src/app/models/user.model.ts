@@ -3,6 +3,7 @@ export interface User {
   username: string;
   email: string;
   password?: string; // Optional password for authentication
+  token?: string; // JWT token for API authentication
   roles: UserRole[]; // Array of roles (can have multiple roles)
   role?: UserRole; // Single role for backward compatibility
   groups: string[]; // Array of group IDs
@@ -10,6 +11,7 @@ export interface User {
   updatedAt: Date;
   avatarUrl?: string;
   isActive: boolean;
+  canRemove?: boolean; // Flag to indicate if user can be removed from group
 }
 
 export enum UserRole {
@@ -27,4 +29,19 @@ export interface UserRegistration {
   username: string;
   email: string;
   password: string;
+}
+
+export interface UserStats {
+  totalUsers: number;
+  superAdmins: number;
+  groupAdmins: number;
+  activeUsers: number;
+}
+
+export interface UserFilters {
+  searchTerm: string;
+  role: UserRole | 'all';
+  isActive: boolean | 'all';
+  sortBy: 'username' | 'email' | 'createdAt' | 'lastLogin';
+  sortOrder: 'asc' | 'desc';
 }

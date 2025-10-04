@@ -19,8 +19,8 @@ import { Group, GroupStatus } from '../../../../models';
             <i class="material-icons">info</i>
             Group Information
           </h2>
-          <div class="status-badge" [ngClass]="getStatusClass(group.status)">
-            {{ group.status }}
+          <div class="status-badge" [ngClass]="getStatusClass(group.status || GroupStatus.ACTIVE)">
+            {{ group.status || GroupStatus.ACTIVE }}
           </div>
         </div>
         <div class="card-content">
@@ -35,11 +35,11 @@ import { Group, GroupStatus } from '../../../../models';
             </div>
             <div class="info-item">
               <label>Members:</label>
-              <span>{{ group.memberCount || group.members.length }} members</span>
+              <span>{{ group.memberCount || (group.members?.length || 0) }} members</span>
             </div>
             <div class="info-item">
               <label>Channels:</label>
-              <span>{{ group.channels.length }} channels</span>
+              <span>{{ group.channels?.length || 0 }} channels</span>
             </div>
             <div class="info-item">
               <label>Created:</label>
@@ -49,10 +49,27 @@ import { Group, GroupStatus } from '../../../../models';
               <label>Last Updated:</label>
               <span>{{ group.updatedAt | date:'shortDate' }}</span>
             </div>
+            <div class="info-item">
+              <label>Privacy:</label>
+              <span class="privacy-tag" [ngClass]="group.isPrivate ? 'private' : 'public'">
+                {{ group.isPrivate ? 'Private' : 'Public' }}
+              </span>
+            </div>
+            <div class="info-item">
+              <label>Max Members:</label>
+              <span>{{ group.maxMembers || 'Unlimited' }}</span>
+            </div>
           </div>
           <div class="description-section" *ngIf="group.description">
             <label>Description:</label>
             <p class="description-text">{{ group.description }}</p>
+          </div>
+          
+          <div class="tags-section" *ngIf="group.tags && group.tags.length > 0">
+            <label>Tags:</label>
+            <div class="tags-container">
+              <span *ngFor="let tag of group.tags" class="tag-chip">{{ tag }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -201,6 +218,53 @@ import { Group, GroupStatus } from '../../../../models';
       line-height: 1.5;
     }
 
+    .privacy-tag {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      display: inline-block;
+    }
+
+    .privacy-tag.private {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .privacy-tag.public {
+      background: #e8f5e8;
+      color: #2e7d32;
+    }
+
+    .tags-section {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e9ecef;
+    }
+
+    .tags-section label {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #666;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .tags-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag-chip {
+      background: #e3f2fd;
+      color: #1976d2;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
     .stats-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -250,6 +314,8 @@ export class GroupOverviewComponent {
     activeMembers: number;
     inactiveMembers: number;
   };
+
+  GroupStatus = GroupStatus;
 
   getStatusClass(status: GroupStatus): string {
     switch (status) {

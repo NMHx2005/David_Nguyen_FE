@@ -7,22 +7,22 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { UserFilters } from '../services/users-management.service';
+import { UserFilters } from '../../../../models/user.model';
 
 @Component({
-    selector: 'app-users-filters',
-    standalone: true,
-    imports: [
-        CommonModule,
-        FormsModule,
-        MatCardModule,
-        MatFormFieldModule,
-        MatInputModule,
-        MatSelectModule,
-        MatButtonModule,
-        MatIconModule
-    ],
-    template: `
+  selector: 'app-users-filters',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    MatCardModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatSelectModule,
+    MatButtonModule,
+    MatIconModule
+  ],
+  template: `
     <mat-card class="search-section-card">
       <mat-card-content>
         <div class="search-section">
@@ -48,7 +48,7 @@ import { UserFilters } from '../services/users-management.service';
 
             <mat-form-field appearance="outline" class="filter-field">
               <mat-label>Status</mat-label>
-              <mat-select [(ngModel)]="filters.status" (selectionChange)="onFiltersChange.emit(filters)">
+              <mat-select [(ngModel)]="filters.isActive" (selectionChange)="onFiltersChange.emit(filters)">
                 <mat-option value="">All Status</mat-option>
                 <mat-option value="active">Active</mat-option>
                 <mat-option value="inactive">Inactive</mat-option>
@@ -64,7 +64,7 @@ import { UserFilters } from '../services/users-management.service';
       </mat-card-content>
     </mat-card>
   `,
-    styles: [`
+  styles: [`
     .search-section-card {
       margin-bottom: 24px;
     }
@@ -108,22 +108,26 @@ import { UserFilters } from '../services/users-management.service';
   `]
 })
 export class UsersFiltersComponent {
-    @Input() filters: UserFilters = {
-        searchTerm: '',
-        role: '',
-        status: ''
+  @Input() filters: UserFilters = {
+    searchTerm: '',
+    role: 'all',
+    isActive: 'all',
+    sortBy: 'username',
+    sortOrder: 'asc'
+  };
+
+  @Output() onFiltersChange = new EventEmitter<UserFilters>();
+
+  constructor() { }
+
+  clearFilters(): void {
+    this.filters = {
+      searchTerm: '',
+      role: 'all',
+      isActive: 'all',
+      sortBy: 'username',
+      sortOrder: 'asc'
     };
-
-    @Output() onFiltersChange = new EventEmitter<UserFilters>();
-
-    constructor() { }
-
-    clearFilters(): void {
-        this.filters = {
-            searchTerm: '',
-            role: '',
-            status: ''
-        };
-        this.onFiltersChange.emit(this.filters);
-    }
+    this.onFiltersChange.emit(this.filters);
+  }
 }

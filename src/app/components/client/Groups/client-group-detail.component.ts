@@ -44,8 +44,8 @@ import { Group, Channel, User, GroupStatus, ChannelType, UserRole } from '../../
               <i class="material-icons">info</i>
               Group Information
             </h2>
-            <div class="status-badge" [ngClass]="getStatusClass(group.status)">
-              {{ group.status }}
+            <div class="status-badge" [ngClass]="getStatusClass(group.status || GroupStatus.ACTIVE)">
+              {{ group.status || 'active' }}
             </div>
           </div>
           <div class="card-content">
@@ -475,6 +475,8 @@ export class ClientGroupDetailComponent implements OnInit {
   groupId: string = '';
   isMember: boolean = false;
 
+  GroupStatus = GroupStatus;
+
   constructor(
     private route: ActivatedRoute,
     private router: Router
@@ -522,11 +524,19 @@ export class ClientGroupDetailComponent implements OnInit {
         type: ChannelType.TEXT,
         memberCount: 15,
         members: ['user1', 'user2', 'user3'],
+        admins: ['admin1'],
         bannedUsers: [],
         createdBy: 'admin1',
         isActive: true,
+        isPrivate: false,
         createdAt: new Date('2024-01-15'),
-        updatedAt: new Date('2024-01-20')
+        updatedAt: new Date('2024-01-20'),
+        settings: {
+          slowMode: 0,
+          requireApproval: false,
+          allowReactions: true,
+          allowPolls: true
+        }
       },
       {
         id: 'channel2',
@@ -536,16 +546,43 @@ export class ClientGroupDetailComponent implements OnInit {
         type: ChannelType.TEXT,
         memberCount: 8,
         members: ['user1', 'user2'],
+        admins: ['admin1'],
         bannedUsers: [],
         createdBy: 'admin1',
         isActive: true,
+        isPrivate: false,
         createdAt: new Date('2024-01-16'),
-        updatedAt: new Date('2024-01-19')
+        updatedAt: new Date('2024-01-19'),
+        settings: {
+          slowMode: 0,
+          requireApproval: false,
+          allowReactions: true,
+          allowPolls: true
+        }
       }
     ];
 
     // Check if current user is a member
-    this.isMember = this.group.members.includes('current_user_id'); // Replace with actual user ID
+    this.isMember = this.checkIfMember('current_user_id'); // Replace with actual user ID
+  }
+
+  /**
+   * Check if user is a member of the group
+   */
+  private checkIfMember(userId: string): boolean {
+    if (!this.group || !this.group.members) {
+      return false;
+    }
+
+    return this.group.members.some((member: any) => {
+      // Handle both string and object formats
+      if (typeof member === 'string') {
+        return member === userId;
+      } else if (typeof member === 'object' && member !== null) {
+        return member.userId === userId || member._id === userId || member.id === userId;
+      }
+      return false;
+    });
   }
 
   /**
@@ -616,7 +653,7 @@ export class ClientGroupDetailComponent implements OnInit {
   /**
    * Format Date to localized short string.
    */
-  formatDate(date: Date): string {
+  formatDate(date: Date | string): string {
     return new Date(date).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',

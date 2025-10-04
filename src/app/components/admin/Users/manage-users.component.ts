@@ -6,14 +6,19 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
-import { Subject, takeUntil } from 'rxjs';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { Subject, takeUntil, BehaviorSubject, debounceTime, distinctUntilChanged } from 'rxjs';
 import { AuthService } from '../../auth/auth.service';
-import { UsersManagementService, UserStats, UserFilters } from './services/users-management.service';
+import { AdminService, AdminResponse } from '../../../services/admin.service';
+import { UserService } from '../../../services/user.service';
 import { UsersStatsComponent } from './ui/users-stats.component';
 import { UsersFiltersComponent } from './ui/users-filters.component';
 import { UsersTableComponent } from './ui/users-table.component';
 import { UserFormDialogComponent, UserFormData } from './ui/user-form-dialog.component';
-import { User, UserRole } from '../../../models/user.model';
+import { User, UserRole, UserStats, UserFilters } from '../../../models/user.model';
 
 @Component({
   selector: 'app-manage-users',
@@ -26,6 +31,10 @@ import { User, UserRole } from '../../../models/user.model';
     MatIconModule,
     MatDialogModule,
     MatSnackBarModule,
+    MatProgressSpinnerModule,
+    MatCheckboxModule,
+    MatMenuModule,
+    MatTooltipModule,
     UsersStatsComponent,
     UsersFiltersComponent,
     UsersTableComponent
@@ -44,6 +53,9 @@ import { User, UserRole } from '../../../models/user.model';
                 <mat-icon>arrow_back</mat-icon>
                 Back to Admin
               </button>
+              <button mat-icon-button (click)="refreshUsers()" matTooltip="Refresh Users">
+                <mat-icon>refresh</mat-icon>
+              </button>
               <button mat-raised-button color="primary" 
                       *ngIf="canCreateUser()" 
                       (click)="openCreateUserDialog()">
@@ -53,6 +65,12 @@ import { User, UserRole } from '../../../models/user.model';
             </div>
           </div>
         </mat-card>
+
+        <!-- Loading State -->
+        <div *ngIf="isLoading" class="loading-container">
+          <mat-spinner diameter="50"></mat-spinner>
+          <p>Loading users...</p>
+        </div>
 
         <!-- Statistics Section -->
         <app-users-stats [stats]="statsData"></app-users-stats>
@@ -114,6 +132,21 @@ import { User, UserRole } from '../../../models/user.model';
       gap: 16px;
     }
 
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+    }
+
+    .loading-container p {
+      margin-top: 20px;
+      color: #666;
+      font-size: 16px;
+    }
+
     @media (max-width: 768px) {
       .manage-users-container {
         padding: 16px;
@@ -128,7 +161,9 @@ import { User, UserRole } from '../../../models/user.model';
   `]
 })
 export class ManageUsersComponent implements OnInit, OnDestroy {
+  // Component state
   filteredUsers: User[] = [];
+  allUsers: User[] = [];
   statsData: UserStats = {
     totalUsers: 0,
     superAdmins: 0,
@@ -137,26 +172,37 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   };
   filters: UserFilters = {
     searchTerm: '',
-    role: '',
-    status: ''
+    role: 'all',
+    isActive: 'all',
+    sortBy: 'username',
+    sortOrder: 'asc'
   };
   selectedUsers: string[] = [];
   currentUser: User | null = null;
   pageSize = 10;
   currentPage = 0;
+  isLoading = false;
+  totalUsers = 0;
+  totalPages = 0;
+
+  // Pagination and search
+  private searchSubject = new BehaviorSubject<string>('');
+  private currentSearchTerm = '';
 
   private destroy$ = new Subject<void>();
 
   constructor(
     private authService: AuthService,
-    private usersManagementService: UsersManagementService,
+    private adminService: AdminService,
+    private userService: UserService,
     private dialog: MatDialog,
     private snackBar: MatSnackBar
   ) { }
 
   ngOnInit(): void {
     this.currentUser = this.authService.getCurrentUser();
-    this.subscribeToServices();
+    this.loadUsers();
+    this.setupSearchSubscription();
   }
 
   ngOnDestroy(): void {
@@ -165,21 +211,103 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Subscribe to service observables
+   * Load users from AdminService
    */
-  private subscribeToServices(): void {
-    // Subscribe to filtered users
-    this.usersManagementService.filteredUsers$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(users => {
-        this.filteredUsers = users;
-      });
+  private loadUsers(): void {
+    this.isLoading = true;
 
-    // Subscribe to statistics
-    this.usersManagementService.stats$
+    this.adminService.getAllUsers({
+      search: this.currentSearchTerm
+    })
       .pipe(takeUntil(this.destroy$))
-      .subscribe(stats => {
-        this.statsData = stats;
+      .subscribe({
+        next: (response: AdminResponse<{
+          users: any[];
+          total: number;
+          page: number;
+          pages: number;
+        }>) => {
+          if (response.success) {
+            this.allUsers = this.mapApiUsersToLocalUsers(response.data.users);
+            this.filteredUsers = this.allUsers;
+            this.totalUsers = response.data.total;
+            this.totalPages = response.data.pages;
+            this.updateStats();
+            this.isLoading = false;
+          } else {
+            this.snackBar.open('Failed to load users', 'Close', { duration: 3000 });
+            this.isLoading = false;
+          }
+        },
+        error: (error) => {
+          console.error('Error loading users:', error);
+          this.snackBar.open('Failed to load users', 'Close', { duration: 3000 });
+          this.isLoading = false;
+        }
+      });
+  }
+
+  /**
+   * Setup search subscription with debounce
+   */
+  private setupSearchSubscription(): void {
+    this.searchSubject
+      .pipe(
+        takeUntil(this.destroy$),
+        debounceTime(300),
+        distinctUntilChanged()
+      )
+      .subscribe(searchTerm => {
+        this.currentSearchTerm = searchTerm;
+        this.currentPage = 0; // Reset to first page
+        this.loadUsers();
+      });
+  }
+
+  /**
+   * Map API users to local User model
+   */
+  private mapApiUsersToLocalUsers(apiUsers: any[]): User[] {
+    return apiUsers.map(apiUser => ({
+      id: apiUser._id || apiUser.id,
+      username: apiUser.username,
+      email: apiUser.email,
+      roles: apiUser.roles || [UserRole.USER],
+      groups: apiUser.groups || [],
+      isActive: apiUser.isActive !== undefined ? apiUser.isActive : true,
+      createdAt: new Date(apiUser.createdAt || apiUser.created_at),
+      updatedAt: new Date(apiUser.updatedAt || apiUser.updated_at)
+    }));
+  }
+
+  /**
+   * Update statistics based on current users
+   */
+  private updateStats(): void {
+    // Load stats from API
+    this.adminService.getUserStats()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.statsData = {
+              totalUsers: response.data.totalUsers,
+              superAdmins: response.data.superAdmins,
+              groupAdmins: response.data.groupAdmins,
+              activeUsers: response.data.activeUsers
+            };
+          }
+        },
+        error: (error) => {
+          console.error('Error loading user stats:', error);
+          // Fallback to local calculation
+          this.statsData = {
+            totalUsers: this.allUsers.length,
+            superAdmins: this.allUsers.filter(user => user.roles.includes(UserRole.SUPER_ADMIN)).length,
+            groupAdmins: this.allUsers.filter(user => user.roles.includes(UserRole.GROUP_ADMIN)).length,
+            activeUsers: this.allUsers.filter(user => user.isActive).length
+          };
+        }
       });
   }
 
@@ -188,7 +316,7 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
    */
   onFiltersChange(filters: UserFilters): void {
     this.filters = filters;
-    this.usersManagementService.filterUsers(filters);
+    this.searchSubject.next(filters.searchTerm);
   }
 
   /**
@@ -197,6 +325,15 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   onPageChange(event: any): void {
     this.currentPage = event.pageIndex;
     this.pageSize = event.pageSize;
+    this.loadUsers();
+  }
+
+  /**
+   * Refresh users data
+   */
+  refreshUsers(): void {
+    this.loadUsers();
+    this.snackBar.open('Users refreshed', 'Close', { duration: 2000 });
   }
 
   /**
@@ -213,7 +350,7 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
    */
   openCreateUserDialog(): void {
     const dialogData: UserFormData = {
-      canCreateSuperAdmin: this.usersManagementService.canCreateSuperAdmin(this.currentUser!),
+      canCreateSuperAdmin: this.canCreateSuperAdmin(),
       isEditMode: false
     };
 
@@ -232,28 +369,37 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   /**
    * Create a new user
    */
-  async createUser(userData: Partial<User>): Promise<void> {
-    try {
-      const result = await this.usersManagementService.createUser(userData, this.currentUser!);
-
-      if (result.success) {
-        this.snackBar.open(result.message, 'Close', {
-          duration: 4000,
-          panelClass: ['success-snackbar']
-        });
-      } else {
-        this.snackBar.open(result.message, 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
-        });
-      }
-    } catch (error) {
-      console.error('Error creating user:', error);
-      this.snackBar.open('Failed to create user. Please try again.', 'Close', {
-        duration: 5000,
-        panelClass: ['error-snackbar']
+  createUser(userData: Partial<User>): void {
+    this.adminService.createUser({
+      username: userData.username!,
+      email: userData.email!,
+      password: userData.password || 'defaultPassword123',
+      roles: userData.roles || [UserRole.USER]
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: AdminResponse<any>) => {
+          if (response.success) {
+            this.snackBar.open('User created successfully', 'Close', {
+              duration: 4000,
+              panelClass: ['success-snackbar']
+            });
+            this.loadUsers(); // Refresh the list
+          } else {
+            this.snackBar.open(response.message || 'Failed to create user', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error creating user:', error);
+          this.snackBar.open('Failed to create user. Please try again.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+        }
       });
-    }
   }
 
   /**
@@ -262,7 +408,7 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   editUser(user: User): void {
     const dialogData: UserFormData = {
       user: user,
-      canCreateSuperAdmin: this.usersManagementService.canCreateSuperAdmin(this.currentUser!),
+      canCreateSuperAdmin: this.canCreateSuperAdmin(),
       isEditMode: true
     };
 
@@ -281,145 +427,208 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   /**
    * Update user
    */
-  async updateUser(userId: string, updates: Partial<User>): Promise<void> {
-    try {
-      const result = await this.usersManagementService.updateUser(userId, updates, this.currentUser!);
-
-      if (result.success) {
-        this.snackBar.open(result.message, 'Close', {
-          duration: 4000,
-          panelClass: ['success-snackbar']
-        });
-      } else {
-        this.snackBar.open(result.message, 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
-        });
-      }
-    } catch (error) {
-      console.error('Error updating user:', error);
-      this.snackBar.open('Failed to update user. Please try again.', 'Close', {
-        duration: 5000,
-        panelClass: ['error-snackbar']
+  updateUser(userId: string, updates: Partial<User>): void {
+    this.adminService.updateUser(userId, {
+      username: updates.username,
+      email: updates.email,
+      roles: updates.roles,
+      isActive: updates.isActive
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: AdminResponse<any>) => {
+          if (response.success) {
+            this.snackBar.open('User updated successfully', 'Close', {
+              duration: 4000,
+              panelClass: ['success-snackbar']
+            });
+            this.loadUsers(); // Refresh the list
+          } else {
+            this.snackBar.open(response.message || 'Failed to update user', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error updating user:', error);
+          this.snackBar.open('Failed to update user. Please try again.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+        }
       });
-    }
   }
 
   /**
    * Delete user
    */
-  async deleteUser(user: User): Promise<void> {
+  deleteUser(user: User): void {
     if (confirm(`Are you sure you want to delete user "${user.username}"?`)) {
-      try {
-        const result = await this.usersManagementService.deleteUser(user.id, this.currentUser!);
-
-        if (result.success) {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 4000,
-            panelClass: ['success-snackbar']
-          });
-        } else {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 5000,
-            panelClass: ['error-snackbar']
-          });
-        }
-      } catch (error) {
-        console.error('Error deleting user:', error);
-        this.snackBar.open('Failed to delete user. Please try again.', 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
+      this.adminService.deleteUser(user.id)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (response: AdminResponse<{ deleted: boolean }>) => {
+            if (response.success) {
+              this.snackBar.open('User deleted successfully', 'Close', {
+                duration: 4000,
+                panelClass: ['success-snackbar']
+              });
+              this.loadUsers(); // Refresh the list
+            } else {
+              this.snackBar.open(response.message || 'Failed to delete user', 'Close', {
+                duration: 5000,
+                panelClass: ['error-snackbar']
+              });
+            }
+          },
+          error: (error) => {
+            console.error('Error deleting user:', error);
+            this.snackBar.open('Failed to delete user. Please try again.', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
         });
-      }
     }
   }
 
   /**
    * Toggle user status
    */
-  async toggleUserStatus(user: User): Promise<void> {
+  toggleUserStatus(user: User): void {
     const action = user.isActive ? 'deactivate' : 'activate';
     if (confirm(`Are you sure you want to ${action} user "${user.username}"?`)) {
-      try {
-        const updates = { isActive: !user.isActive };
-        const result = await this.usersManagementService.updateUser(user.id, updates, this.currentUser!);
-
-        if (result.success) {
-          this.snackBar.open(`User ${action}d successfully`, 'Close', {
-            duration: 4000,
-            panelClass: ['success-snackbar']
-          });
-        } else {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 5000,
-            panelClass: ['error-snackbar']
-          });
-        }
-      } catch (error) {
-        console.error('Error toggling user status:', error);
-        this.snackBar.open('Failed to update user status. Please try again.', 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
+      this.adminService.updateUser(user.id, { isActive: !user.isActive })
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (response: AdminResponse<any>) => {
+            if (response.success) {
+              this.snackBar.open(`User ${action}d successfully`, 'Close', {
+                duration: 4000,
+                panelClass: ['success-snackbar']
+              });
+              this.loadUsers(); // Refresh the list
+            } else {
+              this.snackBar.open(response.message || `Failed to ${action} user`, 'Close', {
+                duration: 5000,
+                panelClass: ['error-snackbar']
+              });
+            }
+          },
+          error: (error) => {
+            console.error('Error toggling user status:', error);
+            this.snackBar.open('Failed to update user status. Please try again.', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
         });
-      }
     }
   }
 
   /**
    * Bulk delete users
    */
-  async bulkDelete(userIds: string[]): Promise<void> {
+  bulkDelete(userIds: string[]): void {
     if (confirm(`Are you sure you want to delete ${userIds.length} users?`)) {
-      try {
-        const result = await this.usersManagementService.bulkDeleteUsers(userIds, this.currentUser!);
-
-        if (result.success) {
-          this.selectedUsers = [];
-          this.snackBar.open(result.message, 'Close', {
-            duration: 4000,
-            panelClass: ['success-snackbar']
-          });
-        } else {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 5000,
-            panelClass: ['error-snackbar']
-          });
-        }
-      } catch (error) {
-        console.error('Error bulk deleting users:', error);
-        this.snackBar.open('Failed to delete users. Please try again.', 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
+      this.adminService.bulkDeleteUsers(userIds)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (response: AdminResponse<{ deletedCount: number }>) => {
+            if (response.success) {
+              this.selectedUsers = [];
+              this.snackBar.open(`${response.data.deletedCount} users deleted successfully`, 'Close', {
+                duration: 4000,
+                panelClass: ['success-snackbar']
+              });
+              this.loadUsers(); // Refresh the list
+            } else {
+              this.snackBar.open(response.message || 'Failed to delete users', 'Close', {
+                duration: 5000,
+                panelClass: ['error-snackbar']
+              });
+            }
+          },
+          error: (error) => {
+            console.error('Error bulk deleting users:', error);
+            this.snackBar.open('Failed to delete users. Please try again.', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
         });
-      }
     }
   }
 
   /**
    * Bulk activate users
    */
-  async bulkActivate(userIds: string[]): Promise<void> {
-    try {
-      const result = await this.usersManagementService.bulkActivateUsers(userIds, this.currentUser!);
-
-      if (result.success) {
-        this.selectedUsers = [];
-        this.snackBar.open(result.message, 'Close', {
-          duration: 4000,
-          panelClass: ['success-snackbar']
-        });
-      } else {
-        this.snackBar.open(result.message, 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
-        });
-      }
-    } catch (error) {
-      console.error('Error bulk activating users:', error);
-      this.snackBar.open('Failed to activate users. Please try again.', 'Close', {
-        duration: 5000,
-        panelClass: ['error-snackbar']
+  bulkActivate(userIds: string[]): void {
+    this.adminService.bulkUpdateUsers(userIds, { isActive: true })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: AdminResponse<{ updatedCount: number }>) => {
+          if (response.success) {
+            this.selectedUsers = [];
+            this.snackBar.open(`${response.data.updatedCount} users activated successfully`, 'Close', {
+              duration: 4000,
+              panelClass: ['success-snackbar']
+            });
+            this.loadUsers(); // Refresh the list
+          } else {
+            this.snackBar.open(response.message || 'Failed to activate users', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error bulk activating users:', error);
+          this.snackBar.open('Failed to activate users. Please try again.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+        }
       });
-    }
+  }
+
+  /**
+   * Bulk deactivate users
+   */
+  bulkDeactivate(userIds: string[]): void {
+    this.adminService.bulkUpdateUsers(userIds, { isActive: false })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: AdminResponse<{ updatedCount: number }>) => {
+          if (response.success) {
+            this.selectedUsers = [];
+            this.snackBar.open(`${response.data.updatedCount} users deactivated successfully`, 'Close', {
+              duration: 4000,
+              panelClass: ['success-snackbar']
+            });
+            this.loadUsers(); // Refresh the list
+          } else {
+            this.snackBar.open(response.message || 'Failed to deactivate users', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error bulk deactivating users:', error);
+          this.snackBar.open('Failed to deactivate users. Please try again.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+        }
+      });
+  }
+
+  /**
+   * Check if current user can create super admin
+   */
+  private canCreateSuperAdmin(): boolean {
+    return this.currentUser?.roles.includes(UserRole.SUPER_ADMIN) || false;
   }
 }

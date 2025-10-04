@@ -3,15 +3,17 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
-import { Subject, takeUntil } from 'rxjs';
-import { AuthService } from '../../auth/auth.service';
-import { GroupsInterestService, GroupsFilters } from './services/groups-interest.service';
+import { Subject, takeUntil, catchError, finalize, forkJoin } from 'rxjs';
+import { AuthService } from '../../../services/auth.service';
+import { User } from '../../../models/user.model';
+import { GroupService } from '../../../services/group.service';
+import { GroupRequestService } from '../../../services/group-request.service';
+import { ClientService } from '../../../services/client.service';
+import { Group } from '../../../models/group.model';
 import { ClientLayoutComponent } from '../../shared/Layout/client-layout.component';
 import { GroupsSearchComponent } from './ui/groups-search.component';
 import { GroupsGridComponent } from './ui/groups-grid.component';
 import { GroupsPaginationComponent } from './ui/groups-pagination.component';
-import { Group } from '../../../models/group.model';
-import { User } from '../../../models/user.model';
 
 @Component({
   selector: 'app-group-interest',
@@ -103,23 +105,38 @@ export class GroupInterestComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Data properties
-  filters: GroupsFilters = { searchTerm: '', selectedCategory: '', selectedStatus: '' };
+  filters: any = { searchTerm: '', selectedCategory: '', selectedStatus: '' };
   paginatedGroups: Group[] = [];
+  allGroups: Group[] = [];
   currentUser: User | null = null;
   pendingRequests: string[] = [];
   currentPage = 1;
   totalPages = 1;
+  isLoading = false;
+  itemsPerPage = 12;
 
   constructor(
     private authService: AuthService,
-    private groupsInterestService: GroupsInterestService,
+    private groupService: GroupService,
+    private groupRequestService: GroupRequestService,
+    private clientService: ClientService,
     private router: Router,
     private snackBar: MatSnackBar
   ) { }
 
   ngOnInit(): void {
-    this.setupSubscriptions();
     this.loadCurrentUser();
+    this.loadGroups();
+
+    // Refresh data every 30 seconds to catch updates from admin approvals
+    setInterval(() => {
+      this.loadGroups();
+    }, 30000);
+  }
+
+  // Add method to refresh data when component becomes active
+  onActivate(): void {
+    this.loadGroups();
   }
 
   ngOnDestroy(): void {
@@ -127,98 +144,270 @@ export class GroupInterestComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  private setupSubscriptions(): void {
-    // Subscribe to paginated groups
-    this.groupsInterestService.paginatedGroups$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(groups => {
-        this.paginatedGroups = groups;
-      });
-
-    // Subscribe to total pages
-    this.groupsInterestService.totalPages$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(totalPages => {
-        this.totalPages = totalPages;
-      });
-
-    // Subscribe to current page
-    this.groupsInterestService.currentPage$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(currentPage => {
-        this.currentPage = currentPage;
-      });
-
-    // Subscribe to pending requests
-    this.groupsInterestService.pendingRequests$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(requests => {
-        this.pendingRequests = requests;
-      });
-
-    // Subscribe to current user
-    this.groupsInterestService.currentUser$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(user => {
-        this.currentUser = user;
-      });
-  }
-
   private loadCurrentUser(): void {
-    const user = this.authService.getCurrentUser();
-    this.groupsInterestService.setCurrentUser(user);
+    this.currentUser = this.authService.getCurrentUser();
+    if (!this.currentUser) {
+      this.router.navigate(['/login']);
+      return;
+    }
   }
 
-  onFiltersChange(filters: GroupsFilters): void {
+  /**
+   * Map API Group to models Group
+   */
+  private mapApiGroupToModel(apiGroup: any): Group {
+    // Filter out members with empty userId or username
+    const validMembers = apiGroup.members?.filter((m: any) =>
+      m.userId && m.userId.trim() !== '' && m.username && m.username.trim() !== ''
+    ) || [];
+
+    return {
+      id: apiGroup._id || apiGroup.id,
+      name: apiGroup.name,
+      description: apiGroup.description,
+      category: 'general', // Default category since API doesn't have it
+      status: 'active' as any, // Default status
+      createdBy: apiGroup.createdBy,
+      admins: apiGroup.admins || [],
+      members: validMembers.map((m: any) => m.userId),
+      channels: [], // Default empty channels
+      createdAt: new Date(apiGroup.createdAt),
+      updatedAt: new Date(apiGroup.updatedAt),
+      isActive: apiGroup.isActive !== false,
+      memberCount: validMembers.length, // Use filtered count
+      maxMembers: apiGroup.maxMembers || 100,
+      tags: apiGroup.tags || [], // Include tags from API
+      isPrivate: apiGroup.isPrivate || false // Include privacy setting
+    };
+  }
+
+  private loadGroups(): void {
+    this.isLoading = true;
+
+    // Load all groups, user's joined groups, and pending requests
+    forkJoin({
+      allGroups: this.groupService.getAllGroups(),
+      userGroups: this.clientService.getUserGroups(),
+      pendingRequests: this.groupRequestService.getGroupRequests({
+        page: 1,
+        limit: 1000,
+        status: 'pending'
+      })
+    })
+      .pipe(
+        takeUntil(this.destroy$),
+        catchError(error => {
+          console.error('Error loading groups:', error);
+          this.showSnackBar('Failed to load groups', 'error');
+          throw error;
+        }),
+        finalize(() => {
+          this.isLoading = false;
+        })
+      )
+      .subscribe({
+        next: (responses: any) => {
+          console.log('🔍 API Responses:', responses);
+
+          if (responses.allGroups.success && responses.allGroups.data?.groups) {
+            console.log('✅ All Groups loaded:', responses.allGroups.data.groups.length);
+            // Map API Groups to models
+            this.allGroups = responses.allGroups.data.groups.map((apiGroup: any) => this.mapApiGroupToModel(apiGroup));
+
+            // Mark which groups user has joined
+            if (responses.userGroups.success && responses.userGroups.data) {
+              console.log('✅ User Groups loaded:', responses.userGroups.data.length);
+              const joinedGroupIds = responses.userGroups.data.map((group: any) => group._id || group.id);
+              this.allGroups.forEach(group => {
+                group.isJoined = joinedGroupIds.includes(group.id);
+              });
+            } else {
+              console.log('⚠️ User Groups empty or failed:', responses.userGroups);
+            }
+
+            // Load pending requests for current user
+            if (responses.pendingRequests.success && responses.pendingRequests.data?.requests) {
+              console.log('✅ Pending Requests loaded:', responses.pendingRequests.data.requests.length);
+              // Filter requests for current user and get group IDs
+              const userPendingRequests = responses.pendingRequests.data.requests
+                .filter((request: any) => request.userId === this.currentUser?.id)
+                .map((request: any) => request.groupId);
+              this.pendingRequests = userPendingRequests;
+            } else {
+              console.log('⚠️ Pending Requests empty or failed:', responses.pendingRequests);
+              this.pendingRequests = [];
+            }
+
+            this.applyFiltersAndPagination();
+          } else {
+            console.log('❌ All Groups failed:', responses.allGroups);
+          }
+        },
+        error: (error: any) => {
+          console.log('💥 Error loading groups:', error);
+          // Error already handled in catchError
+        }
+      });
+  }
+
+  private applyFiltersAndPagination(): void {
+    let filteredGroups = [...this.allGroups];
+
+    // Apply search filter
+    if (this.filters.searchTerm) {
+      const searchTerm = this.filters.searchTerm.toLowerCase();
+      filteredGroups = filteredGroups.filter(group =>
+        group.name.toLowerCase().includes(searchTerm) ||
+        group.description.toLowerCase().includes(searchTerm)
+      );
+    }
+
+    // Apply category filter
+    if (this.filters.selectedCategory) {
+      filteredGroups = filteredGroups.filter(group =>
+        group.name.toLowerCase().includes(this.filters.selectedCategory.toLowerCase())
+      );
+    }
+
+    // Apply status filter
+    if (this.filters.selectedStatus) {
+      filteredGroups = filteredGroups.filter(group =>
+        this.filters.selectedStatus === 'active' ? group.isActive : !group.isActive
+      );
+    }
+
+    // Calculate pagination
+    this.totalPages = Math.ceil(filteredGroups.length / this.itemsPerPage);
+    const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+    const endIndex = startIndex + this.itemsPerPage;
+    this.paginatedGroups = filteredGroups.slice(startIndex, endIndex);
+  }
+
+  onFiltersChange(filters: any): void {
     this.filters = filters;
-    this.groupsInterestService.updateFilters(filters);
+    this.currentPage = 1; // Reset to first page when filters change
+    this.applyFiltersAndPagination();
   }
 
   onPageChange(page: number): void {
-    this.groupsInterestService.setCurrentPage(page);
+    this.currentPage = page;
+    this.applyFiltersAndPagination();
   }
 
-  async onRegisterInterest(groupId: string): Promise<void> {
-    try {
-      const success = await this.groupsInterestService.registerInterest(groupId);
-      if (success) {
-        this.snackBar.open('Interest registered successfully! Group admin will review your request.', 'Close', {
-          duration: 5000
-        });
-      } else {
-        this.snackBar.open('Failed to register interest. Please try again.', 'Close', {
-          duration: 3000
-        });
-      }
-    } catch (error) {
-      console.error('Error registering interest:', error);
-      this.snackBar.open('An error occurred. Please try again.', 'Close', {
-        duration: 3000
-      });
+  onRegisterInterest(groupId: string): void {
+    if (!this.currentUser?.id) {
+      this.showSnackBar('Please login to register interest', 'error');
+      return;
     }
+
+    // Find the group to get its name
+    const group = this.allGroups.find(g => g.id === groupId);
+    if (!group) {
+      this.showSnackBar('Group not found', 'error');
+      return;
+    }
+
+    // Create group request instead of joining directly
+    this.groupRequestService.createGroupRequest({
+      groupId: groupId,
+      requestType: 'register_interest',
+      message: `I would like to join ${group.name} group.`
+    })
+      .pipe(
+        takeUntil(this.destroy$),
+        catchError(error => {
+          console.error('Error creating group request:', error);
+          this.handleJoinError(error);
+          throw error;
+        })
+      )
+      .subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            this.showSnackBar('Request sent successfully! Admin will review your request.', 'success');
+            // Add to pending requests to show "Request Pending" state
+            this.pendingRequests.push(groupId);
+            this.applyFiltersAndPagination(); // Update UI
+          } else {
+            this.showSnackBar(response.message || 'Failed to send request', 'error');
+          }
+        },
+        error: (error: any) => {
+          // Error already handled in catchError
+        }
+      });
   }
 
-  async onRequestInvite(groupId: string): Promise<void> {
-    try {
-      const success = await this.groupsInterestService.requestInvite(groupId);
-      if (success) {
-        this.snackBar.open('Invite request sent! Group admin will review your request.', 'Close', {
-          duration: 5000
-        });
-      } else {
-        this.snackBar.open('Failed to send invite request. Please try again.', 'Close', {
-          duration: 3000
-        });
-      }
-    } catch (error) {
-      console.error('Error requesting invite:', error);
-      this.snackBar.open('An error occurred. Please try again.', 'Close', {
-        duration: 3000
-      });
+  onRequestInvite(groupId: string): void {
+    if (!this.currentUser?.id) {
+      this.showSnackBar('Please login to request invite', 'error');
+      return;
     }
+
+    // Find the group to get its name
+    const group = this.allGroups.find(g => g.id === groupId);
+    if (!group) {
+      this.showSnackBar('Group not found', 'error');
+      return;
+    }
+
+    // Create group request for private groups
+    this.groupRequestService.createGroupRequest({
+      groupId: groupId,
+      requestType: 'request_invite',
+      message: `I would like to request an invitation to join ${group.name} group.`
+    })
+      .pipe(
+        takeUntil(this.destroy$),
+        catchError(error => {
+          console.error('Error creating group request:', error);
+          this.handleJoinError(error);
+          throw error;
+        })
+      )
+      .subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            this.showSnackBar('Invite request sent successfully! Admin will review your request.', 'success');
+            // Add to pending requests to show "Request Pending" state
+            this.pendingRequests.push(groupId);
+            this.applyFiltersAndPagination(); // Update UI
+          } else {
+            this.showSnackBar(response.message || 'Failed to send invite request', 'error');
+          }
+        },
+        error: (error: any) => {
+          // Error already handled in catchError
+        }
+      });
   }
 
   onViewGroup(groupId: string): void {
     this.router.navigate(['/group', groupId]);
+  }
+
+  private handleJoinError(error: any): void {
+    let errorMessage = 'Failed to join group. Please try again.';
+
+    if (error.error?.message) {
+      errorMessage = error.error.message;
+    } else if (error.message) {
+      errorMessage = error.message;
+    } else if (error.status === 400) {
+      errorMessage = 'Invalid group data. Please try again.';
+    } else if (error.status === 409) {
+      errorMessage = 'You are already a member of this group.';
+    } else if (error.status === 0) {
+      errorMessage = 'Unable to connect to server. Please check your internet connection.';
+    }
+
+    this.showSnackBar(errorMessage, 'error');
+  }
+
+  private showSnackBar(message: string, type: 'success' | 'error'): void {
+    this.snackBar.open(message, 'Close', {
+      duration: 3000,
+      panelClass: type === 'success' ? 'success-snackbar' : 'error-snackbar'
+    });
   }
 }

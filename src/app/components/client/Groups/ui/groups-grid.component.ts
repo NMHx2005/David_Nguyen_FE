@@ -22,10 +22,22 @@ import { Group, GroupStatus } from '../../../../models/group.model';
     <div class="groups-container">
       <mat-card *ngFor="let group of groups" class="group-card">
         <mat-card-header>
-          <mat-card-title>{{ group.name }}</mat-card-title>
-          <mat-chip class="group-status" [ngClass]="group.status">
-            {{ getStatusLabel(group.status) }}
-          </mat-chip>
+          <div class="group-header">
+            <mat-card-title>{{ group.name }}</mat-card-title>
+            <div class="group-badges">
+              <mat-chip class="group-status" [ngClass]="group.status">
+                {{ getStatusLabel(group.status || 'active') }}
+              </mat-chip>
+              <mat-chip *ngIf="group.isPrivate" class="privacy-badge private">
+                <mat-icon>lock</mat-icon>
+                Private
+              </mat-chip>
+              <mat-chip *ngIf="!group.isPrivate" class="privacy-badge public">
+                <mat-icon>public</mat-icon>
+                Public
+              </mat-chip>
+            </div>
+          </div>
         </mat-card-header>
 
         <mat-card-content>
@@ -34,19 +46,29 @@ import { Group, GroupStatus } from '../../../../models/group.model';
           <div class="group-meta">
             <div class="meta-item">
               <mat-icon>groups</mat-icon>
-              <span>{{ group.members.length || 0 }} members</span>
+              <span>{{ group.memberCount || 0 }} members</span>
             </div>
             <div class="meta-item">
               <mat-icon>chat</mat-icon>
-              <span>{{ group.channels.length || 0 }} channels</span>
+              <span>{{ group.channels?.length || 0 }} channels</span>
             </div>
             <div class="meta-item">
               <mat-icon>calendar_today</mat-icon>
               <span>{{ formatDate(group.createdAt) }}</span>
             </div>
+            <div class="meta-item" *ngIf="group.maxMembers">
+              <mat-icon>person_add</mat-icon>
+              <span>Max: {{ group.maxMembers }}</span>
+            </div>
           </div>
 
-          <div class="group-categories">
+          <div class="group-categories" *ngIf="group.tags && group.tags.length > 0">
+            <mat-chip *ngFor="let tag of group.tags" class="category-tag">
+              {{ tag }}
+            </mat-chip>
+          </div>
+          
+          <div class="group-categories" *ngIf="(!group.tags || group.tags.length === 0) && group.category">
             <mat-chip class="category-tag">
               {{ group.category | titlecase }}
             </mat-chip>
@@ -125,12 +147,22 @@ import { Group, GroupStatus } from '../../../../models/group.model';
     .group-header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
+      width: 100%;
     }
 
     .group-header mat-card-title {
       font-size: 1.3rem;
       color: #333;
+      margin: 0;
+      flex: 1;
+    }
+
+    .group-badges {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-end;
     }
 
     .group-status {
@@ -152,6 +184,30 @@ import { Group, GroupStatus } from '../../../../models/group.model';
     .group-status.invite {
       background: #fff3e0 !important;
       color: #ef6c00 !important;
+    }
+
+    .privacy-badge {
+      font-size: 0.75rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .privacy-badge.private {
+      background: #fce4ec !important;
+      color: #c2185b !important;
+    }
+
+    .privacy-badge.public {
+      background: #e8f5e8 !important;
+      color: #2e7d32 !important;
+    }
+
+    .privacy-badge mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
     }
 
     .group-description {
@@ -268,8 +324,7 @@ export class GroupsGridComponent {
   }
 
   isMember(group: Group): boolean {
-    if (!this.currentUser || !group.members) return false;
-    return group.members.includes(this.currentUser.id);
+    return group.isJoined || false;
   }
 
   hasPendingRequest(group: Group): boolean {

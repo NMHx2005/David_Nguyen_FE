@@ -2,8 +2,9 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, catchError, finalize } from 'rxjs';
 import { AuthService } from '../auth.service';
+import { LoginRequest, LoginResponse } from '../../../services/api.service';
 import { LoginFormComponent, LoginFormData } from './ui/login-form.component';
 
 @Component({
@@ -18,9 +19,9 @@ import { LoginFormComponent, LoginFormData } from './ui/login-form.component';
     <app-login-form
       [isLoading]="isLoading"
       [successMessage]="successMessage"
-      [showDemoAccounts]="true"
       (onSubmit)="onLoginSubmit($event)"
-      (onRegisterClick)="navigateToRegister()">
+      (onRegisterClick)="navigateToRegister()"
+      (onForgotPasswordClick)="navigateToPasswordReset()">
     </app-login-form>
   `,
     styles: [``]
@@ -73,23 +74,14 @@ export class LoginComponent implements OnInit, OnDestroy {
             const success = await this.authService.login(formData.username, formData.password);
 
             if (success) {
-                this.snackBar.open('Login successful!', 'Close', {
-                    duration: 3000,
-                    panelClass: ['success-snackbar']
-                });
+                this.snackBar.open('Login successful!', 'Close', { duration: 3000 });
                 this.redirectToAppropriatePage();
             } else {
-                this.snackBar.open('Invalid username or password. Please try again.', 'Close', {
-                    duration: 5000,
-                    panelClass: ['error-snackbar']
-                });
+                this.snackBar.open('Invalid credentials. Please try again.', 'Close', { duration: 5000 });
             }
         } catch (error) {
             console.error('Login error:', error);
-            this.snackBar.open('Login failed. Please try again.', 'Close', {
-                duration: 5000,
-                panelClass: ['error-snackbar']
-            });
+            this.handleLoginError(error);
         } finally {
             this.isLoading = false;
         }
@@ -97,6 +89,30 @@ export class LoginComponent implements OnInit, OnDestroy {
 
     navigateToRegister(): void {
         this.router.navigate(['/register']);
+    }
+
+    navigateToPasswordReset(): void {
+        this.router.navigate(['/password-reset']);
+    }
+
+
+    private handleLoginError(error: any): void {
+        let errorMessage = 'Login failed. Please try again.';
+
+        if (error.error?.message) {
+            errorMessage = error.error.message;
+        } else if (error.message) {
+            errorMessage = error.message;
+        } else if (error.status === 401) {
+            errorMessage = 'Invalid email or password. Please try again.';
+        } else if (error.status === 0) {
+            errorMessage = 'Unable to connect to server. Please check your internet connection.';
+        }
+
+        this.snackBar.open(errorMessage, 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+        });
     }
 
     private redirectToAppropriatePage(): void {
@@ -110,7 +126,9 @@ export class LoginComponent implements OnInit, OnDestroy {
         const returnUrl = this.route.snapshot.queryParams['returnUrl'] || '/home';
 
         // Redirect based on user role
-        if (this.authService.isSuperAdmin() || this.authService.isGroupAdmin()) {
+        if (this.authService.isSuperAdmin()) {
+            this.router.navigate(['/admin']);
+        } else if (this.authService.isGroupAdmin()) {
             this.router.navigate(['/admin']);
         } else {
             this.router.navigate([returnUrl]);

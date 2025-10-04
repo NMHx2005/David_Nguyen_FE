@@ -5,9 +5,12 @@ import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject, takeUntil } from 'rxjs';
-import { AuthService } from '../../auth/auth.service';
-import { GroupRequestsService, GroupInterestRequest, GroupRequestsStats } from './services/group-requests.service';
+import { AuthService } from '../../../services/auth.service';
+import { GroupRequestService } from '../../../services/group-request.service';
+import { GroupInterestRequest, GroupRequestsStats } from '../../../models/group.model';
 import { GroupRequestsStatsComponent } from './ui/group-requests-stats.component';
 import { GroupRequestsTableComponent } from './ui/group-requests-table.component';
 
@@ -22,6 +25,8 @@ import { GroupRequestsTableComponent } from './ui/group-requests-table.component
     MatButtonModule,
     MatIconModule,
     MatSnackBarModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule,
     GroupRequestsStatsComponent,
     GroupRequestsTableComponent
   ],
@@ -39,6 +44,9 @@ import { GroupRequestsTableComponent } from './ui/group-requests-table.component
                 <mat-icon>arrow_back</mat-icon>
                 Back to Admin
               </button>
+              <button mat-icon-button (click)="refreshRequests()" matTooltip="Refresh Requests">
+                <mat-icon>refresh</mat-icon>
+              </button>
             </div>
           </div>
         </mat-card>
@@ -46,8 +54,15 @@ import { GroupRequestsTableComponent } from './ui/group-requests-table.component
         <!-- Statistics Section -->
         <app-group-requests-stats [stats]="statsData"></app-group-requests-stats>
 
+        <!-- Loading State -->
+        <div *ngIf="isLoading" class="loading-container">
+          <mat-spinner diameter="50"></mat-spinner>
+          <p>Loading group requests...</p>
+        </div>
+
         <!-- Requests Table -->
         <app-group-requests-table 
+          *ngIf="!isLoading"
           [requests]="requests"
           (onApproveRequest)="approveRequest($event)"
           (onRejectRequest)="rejectRequest($event)">
@@ -89,6 +104,21 @@ import { GroupRequestsTableComponent } from './ui/group-requests-table.component
       gap: 16px;
     }
 
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+    }
+
+    .loading-container p {
+      margin-top: 20px;
+      color: #666;
+      font-size: 16px;
+    }
+
 
     @media (max-width: 768px) {
       .manage-requests-container {
@@ -112,12 +142,13 @@ export class ManageGroupRequestsComponent implements OnInit, OnDestroy {
     rejectedRequests: 0
   };
   currentUser: any = null;
+  isLoading = false;
 
   private destroy$ = new Subject<void>();
 
   constructor(
     private authService: AuthService,
-    private groupRequestsService: GroupRequestsService,
+    private groupRequestService: GroupRequestService,
     private snackBar: MatSnackBar
   ) { }
 
@@ -135,19 +166,86 @@ export class ManageGroupRequestsComponent implements OnInit, OnDestroy {
    * Subscribe to service observables
    */
   private subscribeToServices(): void {
-    // Subscribe to requests data
-    this.groupRequestsService.requests$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(requests => {
-        this.requests = requests;
-      });
+    // Load initial data
+    this.loadRequests();
+  }
 
-    // Subscribe to statistics
-    this.groupRequestsService.stats$
+  private loadRequests(): void {
+    console.log('Loading group requests...');
+    this.isLoading = true;
+
+    this.groupRequestService.getGroupRequests({
+      page: 1,
+      limit: 100,
+      sortBy: 'requestedAt',
+      sortOrder: 'desc'
+    })
       .pipe(takeUntil(this.destroy$))
-      .subscribe(stats => {
-        this.statsData = stats;
+      .subscribe({
+        next: (response) => {
+          console.log('Group requests API response:', response);
+          this.isLoading = false;
+          if (response.success) {
+            this.requests = response.data.requests.map((apiRequest: any) => this.mapApiRequestToModel(apiRequest));
+            this.updateStats();
+          } else {
+            this.snackBar.open(response.message || 'Failed to load group requests', 'Close', {
+              duration: 3000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error loading group requests:', error);
+          this.isLoading = false;
+          this.snackBar.open('Failed to load group requests. Please check your connection.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+          // Don't redirect for permission errors
+          if ((error as any)?.error?.message !== 'Insufficient permissions') {
+            // Handle other errors if needed
+          }
+        }
       });
+  }
+
+  /**
+   * Refresh requests data
+   */
+  refreshRequests(): void {
+    this.loadRequests();
+  }
+
+  private updateStats(): void {
+    this.statsData = {
+      totalRequests: this.requests.length,
+      pendingRequests: this.requests.filter(r => r.status === 'pending').length,
+      approvedRequests: this.requests.filter(r => r.status === 'approved').length,
+      rejectedRequests: this.requests.filter(r => r.status === 'rejected').length
+    };
+  }
+
+  /**
+   * Map API request to GroupInterestRequest model
+   */
+  private mapApiRequestToModel(apiRequest: any): GroupInterestRequest {
+    return {
+      id: apiRequest._id || apiRequest.id,
+      userId: apiRequest.userId,
+      username: apiRequest.username,
+      userEmail: apiRequest.userEmail,
+      groupId: apiRequest.groupId,
+      groupName: apiRequest.groupName,
+      requestType: apiRequest.requestType || 'register_interest',
+      status: apiRequest.status || 'pending',
+      requestedAt: new Date(apiRequest.requestedAt || apiRequest.createdAt),
+      reviewedAt: apiRequest.reviewedAt ? new Date(apiRequest.reviewedAt) : undefined,
+      reviewedBy: apiRequest.reviewedBy,
+      reviewerName: apiRequest.reviewerName,
+      reason: apiRequest.reason,
+      message: apiRequest.message
+    };
   }
 
 
@@ -157,19 +255,45 @@ export class ManageGroupRequestsComponent implements OnInit, OnDestroy {
   async approveRequest(request: GroupInterestRequest): Promise<void> {
     if (confirm(`Approve ${request.username}'s request to join "${request.groupName}"?`)) {
       try {
-        const result = await this.groupRequestsService.approveRequest(request, this.currentUser);
+        console.log('Approving request:', request.id);
 
-        if (result.success) {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 4000,
-            panelClass: ['success-snackbar']
+        this.groupRequestService.approveRequest(request.id)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: (result) => {
+              console.log('Approve request response:', result);
+              if (result.success) {
+                this.snackBar.open(result.message || 'Request approved successfully', 'Close', {
+                  duration: 4000,
+                  panelClass: ['success-snackbar']
+                });
+                // Update the request status locally
+                const index = this.requests.findIndex(r => r.id === request.id);
+                if (index !== -1) {
+                  this.requests[index].status = 'approved';
+                  this.requests[index].reviewedAt = new Date();
+                  this.requests[index].reviewedBy = this.currentUser?.id;
+                  this.requests[index].reviewerName = this.currentUser?.username || 'Admin';
+                  this.updateStats();
+                }
+
+                // Refresh data to get updated user groups
+                this.refreshRequests();
+              } else {
+                this.snackBar.open(result.message || 'Failed to approve request', 'Close', {
+                  duration: 5000,
+                  panelClass: ['error-snackbar']
+                });
+              }
+            },
+            error: (error) => {
+              console.error('Error approving request:', error);
+              this.snackBar.open('Failed to approve request. Please try again.', 'Close', {
+                duration: 5000,
+                panelClass: ['error-snackbar']
+              });
+            }
           });
-        } else {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 5000,
-            panelClass: ['error-snackbar']
-          });
-        }
       } catch (error) {
         console.error('Error approving request:', error);
         this.snackBar.open('Failed to approve request. Please try again.', 'Close', {
@@ -186,19 +310,42 @@ export class ManageGroupRequestsComponent implements OnInit, OnDestroy {
   async rejectRequest(request: GroupInterestRequest): Promise<void> {
     if (confirm(`Reject ${request.username}'s request to join "${request.groupName}"?`)) {
       try {
-        const result = await this.groupRequestsService.rejectRequest(request, this.currentUser);
+        console.log('Rejecting request:', request.id);
 
-        if (result.success) {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 4000,
-            panelClass: ['warning-snackbar']
+        this.groupRequestService.rejectRequest(request.id)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: (result) => {
+              console.log('Reject request response:', result);
+              if (result.success) {
+                this.snackBar.open(result.message || 'Request rejected successfully', 'Close', {
+                  duration: 4000,
+                  panelClass: ['warning-snackbar']
+                });
+                // Update the request status locally
+                const index = this.requests.findIndex(r => r.id === request.id);
+                if (index !== -1) {
+                  this.requests[index].status = 'rejected';
+                  this.requests[index].reviewedAt = new Date();
+                  this.requests[index].reviewedBy = this.currentUser?.id;
+                  this.requests[index].reviewerName = this.currentUser?.username || 'Admin';
+                  this.updateStats();
+                }
+              } else {
+                this.snackBar.open(result.message || 'Failed to reject request', 'Close', {
+                  duration: 5000,
+                  panelClass: ['error-snackbar']
+                });
+              }
+            },
+            error: (error) => {
+              console.error('Error rejecting request:', error);
+              this.snackBar.open('Failed to reject request. Please try again.', 'Close', {
+                duration: 5000,
+                panelClass: ['error-snackbar']
+              });
+            }
           });
-        } else {
-          this.snackBar.open(result.message, 'Close', {
-            duration: 5000,
-            panelClass: ['error-snackbar']
-          });
-        }
       } catch (error) {
         console.error('Error rejecting request:', error);
         this.snackBar.open('Failed to reject request. Please try again.', 'Close', {

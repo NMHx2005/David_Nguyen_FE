@@ -13,13 +13,16 @@ import { MatDialogModule, MatDialog, MatDialogRef, MAT_DIALOG_DATA } from '@angu
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
-import { Subject, takeUntil } from 'rxjs';
-import { AuthService } from '../../auth/auth.service';
-import { GroupsManagementService } from './services/groups-management.service';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { Subject, takeUntil, catchError, finalize } from 'rxjs';
+import { AuthService } from '../../../services/auth.service';
+import { User } from '../../../models/user.model';
+import { GroupService } from '../../../services/group.service';
+import { Group, GroupStatus } from '../../../models/group.model';
+import { UserRole } from '../../../models/user.model';
 import { GroupsTableComponent } from './ui/groups-table.component';
 import { GroupsStatsComponent } from './ui/groups-stats.component';
-import { User, UserRole } from '../../../models/user.model';
-import { Group, GroupStatus } from '../../../models/group.model';
 
 @Component({
   selector: 'app-create-group-dialog',
@@ -52,33 +55,24 @@ import { Group, GroupStatus } from '../../../models/group.model';
         <mat-form-field appearance="outline" class="full-width">
           <mat-label>Description</mat-label>
           <textarea matInput formControlName="description" rows="3" maxlength="200"></textarea>
+          <mat-hint align="end">{{ groupForm.get('description')?.value?.length || 0 }}/200</mat-hint>
         </mat-form-field>
 
         <mat-form-field appearance="outline" class="full-width">
-          <mat-label>Category</mat-label>
-          <mat-select formControlName="category" required>
-            <mat-option value="">Select Category</mat-option>
-            <mat-option value="technology">Technology</mat-option>
-            <mat-option value="business">Business</mat-option>
-            <mat-option value="education">Education</mat-option>
-            <mat-option value="entertainment">Entertainment</mat-option>
-            <mat-option value="other">Other</mat-option>
+          <mat-label>Privacy</mat-label>
+          <mat-select formControlName="isPrivate">
+            <mat-option [value]="false">Public</mat-option>
+            <mat-option [value]="true">Private</mat-option>
           </mat-select>
-          <mat-error *ngIf="groupForm.get('category')?.hasError('required')">
-            Category is required
-          </mat-error>
-        </mat-form-field>
-
-        <mat-form-field appearance="outline" class="full-width">
-          <mat-label>Max Members</mat-label>
-          <input matInput type="number" formControlName="maxMembers" min="1" max="1000">
         </mat-form-field>
       </form>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
       <button mat-button (click)="dialogRef.close()">Cancel</button>
-      <button mat-raised-button color="primary" (click)="createGroup()" [disabled]="!groupForm.valid">
-        Create Group
+      <button mat-raised-button color="primary" (click)="createGroup()" [disabled]="!groupForm.valid || isSubmitting">
+        <mat-icon *ngIf="!isSubmitting">add</mat-icon>
+        <mat-icon *ngIf="isSubmitting" class="spinning">refresh</mat-icon>
+        {{ isSubmitting ? 'Creating...' : 'Create Group' }}
       </button>
     </mat-dialog-actions>
   `,
@@ -91,25 +85,85 @@ import { Group, GroupStatus } from '../../../models/group.model';
 })
 export class CreateGroupDialogComponent {
   groupForm: FormGroup;
+  isSubmitting = false;
 
   constructor(
     public dialogRef: MatDialogRef<CreateGroupDialogComponent>,
     private fb: FormBuilder,
+    private groupService: GroupService,
+    private snackBar: MatSnackBar,
     @Inject(MAT_DIALOG_DATA) public data: { onCreate: (group: Partial<Group>) => void }
   ) {
     this.groupForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(50)]],
       description: ['', Validators.maxLength(200)],
-      category: ['', Validators.required],
-      maxMembers: [100, [Validators.min(1), Validators.max(1000)]]
+      isPrivate: [false]
     });
   }
 
   createGroup(): void {
-    if (this.groupForm.valid) {
-      this.data.onCreate(this.groupForm.value);
-      this.dialogRef.close();
+    if (this.groupForm.valid && !this.isSubmitting) {
+      this.isSubmitting = true;
+
+      const groupData = {
+        name: this.groupForm.get('name')?.value,
+        description: this.groupForm.get('description')?.value,
+        isPrivate: this.groupForm.get('isPrivate')?.value
+      };
+
+      this.groupService.createGroup(groupData)
+        .pipe(
+          catchError(error => {
+            console.error('Error creating group:', error);
+            this.handleCreateError(error);
+            throw error;
+          }),
+          finalize(() => {
+            this.isSubmitting = false;
+          })
+        )
+        .subscribe({
+          next: (response: any) => {
+            if (response.success) {
+              this.snackBar.open('Group created successfully!', 'Close', {
+                duration: 3000,
+                panelClass: ['success-snackbar']
+              });
+              this.data.onCreate(response.data);
+              this.dialogRef.close();
+            } else {
+              this.snackBar.open(response.message || 'Failed to create group', 'Close', {
+                duration: 3000,
+                panelClass: ['error-snackbar']
+              });
+            }
+          },
+          error: (error: any) => {
+            // Error already handled in catchError
+          }
+        });
     }
+  }
+
+  private handleCreateError(error: any): void {
+    let errorMessage = 'Failed to create group. Please try again.';
+
+    if (error.error?.message) {
+      errorMessage = error.error.message;
+    } else if (error.message) {
+      errorMessage = error.message;
+    } else if (error.status === 400) {
+      errorMessage = 'Invalid group data. Please check your input.';
+    } else if (error.status === 409) {
+      errorMessage = 'Group name already exists. Please choose a different name.';
+    } else if (error.status === 0) {
+      errorMessage = 'Unable to connect to server. Please check your internet connection.';
+    }
+
+    this.snackBar.open(errorMessage, 'Close', {
+      duration: 5000,
+      panelClass: ['error-snackbar']
+    });
   }
 }
 
@@ -131,6 +185,8 @@ export class CreateGroupDialogComponent {
     MatTooltipModule,
     MatDialogModule,
     MatSnackBarModule,
+    MatPaginatorModule,
+    MatProgressSpinnerModule,
   ],
   template: `
       <div class="manage-groups-container">
@@ -145,6 +201,10 @@ export class CreateGroupDialogComponent {
               <button mat-stroked-button routerLink="/admin">
                 <mat-icon>arrow_back</mat-icon>
                 Back to Admin
+              </button>
+              <button mat-stroked-button (click)="exportGroups()">
+                <mat-icon>download</mat-icon>
+                Export
               </button>
               <button mat-raised-button color="primary" (click)="openCreateGroupDialog()" 
                       [disabled]="!canCreateGroup()">
@@ -224,9 +284,9 @@ export class CreateGroupDialogComponent {
                   <mat-label>Status</mat-label>
                   <mat-select [(ngModel)]="statusFilter" (selectionChange)="filterGroups()">
                     <mat-option value="">All Status</mat-option>
-                    <mat-option value="ACTIVE">Active</mat-option>
-                    <mat-option value="INACTIVE">Inactive</mat-option>
-                    <mat-option value="PENDING">Pending</mat-option>
+                    <mat-option value="active">Active</mat-option>
+                    <mat-option value="inactive">Inactive</mat-option>
+                    <mat-option value="pending">Pending</mat-option>
                   </mat-select>
                 </mat-form-field>
 
@@ -242,10 +302,84 @@ export class CreateGroupDialogComponent {
                   </mat-select>
                 </mat-form-field>
 
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Privacy</mat-label>
+                  <mat-select [(ngModel)]="privacyFilter" (selectionChange)="filterGroups()">
+                    <mat-option value="">All Groups</mat-option>
+                    <mat-option value="public">Public</mat-option>
+                    <mat-option value="private">Private</mat-option>
+                  </mat-select>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Member Count</mat-label>
+                  <mat-select [(ngModel)]="memberCountFilter" (selectionChange)="filterGroups()">
+                    <mat-option value="">Any Size</mat-option>
+                    <mat-option value="small">Small (1-10)</mat-option>
+                    <mat-option value="medium">Medium (11-50)</mat-option>
+                    <mat-option value="large">Large (51+)</mat-option>
+                  </mat-select>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Sort By</mat-label>
+                  <mat-select [(ngModel)]="sortBy" (selectionChange)="filterGroups()">
+                    <mat-option value="createdAt">Created Date</mat-option>
+                    <mat-option value="name">Name</mat-option>
+                    <mat-option value="memberCount">Member Count</mat-option>
+                    <mat-option value="updatedAt">Last Updated</mat-option>
+                  </mat-select>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Order</mat-label>
+                  <mat-select [(ngModel)]="sortOrder" (selectionChange)="filterGroups()">
+                    <mat-option value="desc">Descending</mat-option>
+                    <mat-option value="asc">Ascending</mat-option>
+                  </mat-select>
+                </mat-form-field>
+
                 <button mat-stroked-button (click)="clearFilters()">
                   <mat-icon>clear</mat-icon>
                   Clear Filters
                 </button>
+
+                <button mat-stroked-button (click)="toggleAdvancedFilters()">
+                  <mat-icon>{{ showAdvancedFilters ? 'expand_less' : 'expand_more' }}</mat-icon>
+                  {{ showAdvancedFilters ? 'Hide' : 'Show' }} Advanced
+                </button>
+              </div>
+
+              <!-- Advanced Filters -->
+              <div *ngIf="showAdvancedFilters" class="advanced-filters">
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Created Date From</mat-label>
+                  <input matInput type="date" [(ngModel)]="dateFrom" (change)="filterGroups()">
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Created Date To</mat-label>
+                  <input matInput type="date" [(ngModel)]="dateTo" (change)="filterGroups()">
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Created By</mat-label>
+                  <mat-select [(ngModel)]="createdByFilter" (selectionChange)="filterGroups()">
+                    <mat-option value="">All Creators</mat-option>
+                    <mat-option *ngFor="let user of creators" [value]="user.id">
+                      {{ user.username }}
+                    </mat-option>
+                  </mat-select>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="filter-field">
+                  <mat-label>Has Channels</mat-label>
+                  <mat-select [(ngModel)]="hasChannelsFilter" (selectionChange)="filterGroups()">
+                    <mat-option value="">All Groups</mat-option>
+                    <mat-option value="yes">With Channels</mat-option>
+                    <mat-option value="no">Without Channels</mat-option>
+                  </mat-select>
+                </mat-form-field>
               </div>
             </div>
           </mat-card-content>
@@ -261,7 +395,13 @@ export class CreateGroupDialogComponent {
           </mat-card-header>
 
           <mat-card-content>
-            <div class="table-container">
+            <!-- Loading indicator -->
+            <div *ngIf="isLoading" class="loading-container">
+              <mat-spinner diameter="40"></mat-spinner>
+              <p>Loading groups...</p>
+            </div>
+
+            <div *ngIf="!isLoading" class="table-container">
               <table mat-table [dataSource]="filteredGroups" class="groups-table">
                 <!-- Name Column -->
                 <ng-container matColumnDef="name">
@@ -298,7 +438,7 @@ export class CreateGroupDialogComponent {
                 <ng-container matColumnDef="members">
                   <th mat-header-cell *matHeaderCellDef>Members</th>
                   <td mat-cell *matCellDef="let group">
-                    {{ group.memberCount || group.members.length }} / {{ group.maxMembers }}
+                    {{ group.memberCount || (group.members?.length || 0) }} / {{ group.maxMembers }}
                   </td>
                 </ng-container>
 
@@ -368,6 +508,17 @@ export class CreateGroupDialogComponent {
               <h3>No Groups Found</h3>
               <p>Try adjusting your search criteria or create a new group.</p>
             </div>
+
+            <!-- Paginator -->
+            <mat-paginator 
+              *ngIf="totalGroups > pageSize"
+              [length]="totalGroups"
+              [pageSize]="pageSize"
+              [pageSizeOptions]="[5, 10, 25, 50]"
+              [pageIndex]="currentPage"
+              (page)="onPageChange($event)"
+              showFirstLastButtons>
+            </mat-paginator>
           </mat-card-content>
         </mat-card>
       </div>
@@ -605,6 +756,42 @@ export class CreateGroupDialogComponent {
       opacity: 0.7;
     }
 
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .loading-container p {
+      margin-top: 16px;
+      font-size: 1rem;
+    }
+
+    .advanced-filters {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      padding: 16px;
+      background-color: #f8f9fa;
+      border-radius: 8px;
+      border: 1px solid #e9ecef;
+    }
+
+    .advanced-filters .filter-field {
+      min-width: 180px;
+    }
+
+    .filter-options {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
     @media (max-width: 768px) {
       .manage-groups-container {
         padding: 16px;
@@ -641,11 +828,32 @@ export class ManageGroupsComponent implements OnInit {
   searchTerm = '';
   statusFilter = '';
   categoryFilter = '';
+
+  // New filter properties
+  privacyFilter = '';
+  memberCountFilter = '';
+  sortBy = 'createdAt';
+  sortOrder = 'desc';
+  showAdvancedFilters = false;
+  dateFrom = '';
+  dateTo = '';
+  createdByFilter = '';
+  hasChannelsFilter = '';
+  creators: any[] = [];
+
   displayedColumns = ['name', 'category', 'status', 'members', 'channels', 'createdBy', 'created', 'actions'];
   currentUser: User | null = null;
 
+  // Pagination properties
+  currentPage = 0;
+  pageSize = 10;
+  totalGroups = 0;
+  totalPages = 0;
+  isLoading = false;
+
   constructor(
     private authService: AuthService,
+    private groupService: GroupService,
     private router: Router,
     private dialog: MatDialog,
     private snackBar: MatSnackBar
@@ -654,17 +862,53 @@ export class ManageGroupsComponent implements OnInit {
   ngOnInit(): void {
     this.currentUser = this.authService.getCurrentUser();
     this.loadGroups();
-    this.filterGroups();
   }
 
   loadGroups(): void {
-    const storedGroups = localStorage.getItem('groups');
-    if (storedGroups) {
-      this.groups = JSON.parse(storedGroups);
-    } else {
-      // Initialize with default groups if none exist
-      this.initializeDefaultGroups();
-    }
+    this.isLoading = true;
+
+    this.groupService.getAllGroups({
+      page: this.currentPage + 1, // API uses 1-based pagination
+      limit: this.pageSize,
+      search: this.searchTerm,
+      status: this.statusFilter,
+      category: this.categoryFilter
+    })
+      .pipe(
+        catchError(error => {
+          console.error('Error loading groups:', error);
+          this.snackBar.open('Failed to load groups.', 'Close', {
+            duration: 3000,
+            panelClass: ['error-snackbar']
+          });
+          this.groups = [];
+          this.filteredGroups = [];
+          this.totalGroups = 0;
+          throw error;
+        }),
+        finalize(() => this.isLoading = false)
+      )
+      .subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            this.groups = response.data.groups.map((apiGroup: any) => this.mapApiGroupToModel(apiGroup));
+            this.filteredGroups = [...this.groups];
+            this.totalGroups = response.data.total;
+            this.totalPages = response.data.pages;
+          } else {
+            this.snackBar.open(response.message || 'Failed to load groups', 'Close', {
+              duration: 3000,
+              panelClass: ['error-snackbar']
+            });
+            this.groups = [];
+            this.filteredGroups = [];
+            this.totalGroups = 0;
+          }
+        },
+        error: (error: any) => {
+          // Error already handled in catchError
+        }
+      });
   }
 
   initializeDefaultGroups(): void {
@@ -718,17 +962,36 @@ export class ManageGroupsComponent implements OnInit {
         maxMembers: 25
       }
     ];
-    localStorage.setItem('groups', JSON.stringify(this.groups));
+    // No need to store in localStorage - data comes from API
   }
 
-  filterGroups(): void {
-    this.filteredGroups = this.groups.filter(group => {
-      const matchesSearch = group.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        group.description.toLowerCase().includes(this.searchTerm.toLowerCase());
-      const matchesStatus = !this.statusFilter || group.status === this.statusFilter;
-      const matchesCategory = !this.categoryFilter || group.category === this.categoryFilter;
-      return matchesSearch && matchesStatus && matchesCategory;
-    });
+  /**
+   * Map API Group to models Group
+   */
+  private mapApiGroupToModel(apiGroup: any): Group {
+    return {
+      id: apiGroup._id || apiGroup.id,
+      name: apiGroup.name,
+      description: apiGroup.description,
+      category: 'general', // Default category since API doesn't have it
+      status: apiGroup.status || GroupStatus.ACTIVE, // Map from API response
+      createdBy: apiGroup.createdBy,
+      admins: apiGroup.admins || [],
+      members: apiGroup.members?.map((m: any) => m.userId || m) || [],
+      channels: [], // Default empty channels
+      createdAt: new Date(apiGroup.createdAt),
+      updatedAt: new Date(apiGroup.updatedAt),
+      isActive: apiGroup.isActive !== false,
+      memberCount: apiGroup.members?.length || 0,
+      maxMembers: 100 // Default max members
+    };
+  }
+
+
+  onPageChange(event: PageEvent): void {
+    this.currentPage = event.pageIndex;
+    this.pageSize = event.pageSize;
+    this.loadGroups();
   }
 
   getStatusDisplayName(status: GroupStatus): string {
@@ -746,9 +1009,8 @@ export class ManageGroupsComponent implements OnInit {
   }
 
   getCreatorName(creatorId: string): string {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const creator = users.find((u: User) => u.id === creatorId);
-    return creator ? creator.username : 'Unknown';
+    // This would typically come from UserService
+    return 'Unknown';
   }
 
   // Business Logic: Permission checks
@@ -762,7 +1024,7 @@ export class ManageGroupsComponent implements OnInit {
     if (!this.currentUser) return false;
     if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
     if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-      return group.createdBy === this.currentUser.id;
+      return group.createdBy === (this.currentUser as any).id;
     }
     return false;
   }
@@ -771,7 +1033,7 @@ export class ManageGroupsComponent implements OnInit {
     if (!this.currentUser) return false;
     if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
     if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-      return group.createdBy === this.currentUser.id;
+      return group.createdBy === (this.currentUser as any).id;
     }
     return false;
   }
@@ -780,7 +1042,7 @@ export class ManageGroupsComponent implements OnInit {
     if (!this.currentUser) return false;
     if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
     if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-      return group.createdBy === this.currentUser.id;
+      return group.createdBy === (this.currentUser as any).id;
     }
     return false;
   }
@@ -800,30 +1062,47 @@ export class ManageGroupsComponent implements OnInit {
     }
 
     try {
-      // Check if group has members
-      if (group.members.length > 1) { // More than just the creator
-        this.snackBar.open('Cannot delete group with active members. Remove all members first.', 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
+      // Allow deletion even with active members
+      this.groupService.deleteGroup(group.id)
+        .pipe(
+          catchError(error => {
+            console.error('Error deleting group:', error);
+            this.snackBar.open('Failed to delete group. Please try again.', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+            throw error;
+          })
+        )
+        .subscribe({
+          next: (response) => {
+            if (response.success) {
+              // Remove group from all users' groups array
+              this.removeGroupFromUsers(group.id);
+
+              // Cascade delete: remove all channels that belong to this group
+              this.removeChannelsByGroup(group.id);
+
+              // Delete the group from local array
+              this.groups = this.groups.filter(g => g.id !== group.id);
+              this.updateGroups();
+              this.filterGroups();
+
+              this.snackBar.open(`Group "${group.name}" deleted successfully`, 'Close', {
+                duration: 3000,
+                panelClass: ['success-snackbar']
+              });
+            } else {
+              this.snackBar.open(response.message || 'Failed to delete group', 'Close', {
+                duration: 5000,
+                panelClass: ['error-snackbar']
+              });
+            }
+          },
+          error: (error) => {
+            // Error already handled in catchError
+          }
         });
-        return;
-      }
-
-      // Remove group from all users' groups array
-      this.removeGroupFromUsers(group.id);
-
-      // Cascade delete: remove all channels that belong to this group
-      this.removeChannelsByGroup(group.id);
-
-      // Delete the group
-      this.groups = this.groups.filter(g => g.id !== group.id);
-      this.updateGroups();
-      this.filterGroups();
-
-      this.snackBar.open(`Group "${group.name}" deleted successfully`, 'Close', {
-        duration: 3000,
-        panelClass: ['success-snackbar']
-      });
     } catch (error) {
       this.snackBar.open('Failed to delete group. Please try again.', 'Close', {
         duration: 5000,
@@ -834,39 +1113,57 @@ export class ManageGroupsComponent implements OnInit {
 
   toggleGroupStatus(group: Group): void {
     const newStatus = group.status === GroupStatus.ACTIVE ? GroupStatus.INACTIVE : GroupStatus.ACTIVE;
-    group.status = newStatus;
-    group.updatedAt = new Date();
 
-    this.updateGroups();
-    this.filterGroups();
+    // Call API to update status
+    this.groupService.updateGroup(group.id, { status: newStatus })
+      .pipe(
+        catchError(error => {
+          console.error('Error updating group status:', error);
+          this.snackBar.open('Failed to update group status. Please try again.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+          throw error;
+        })
+      )
+      .subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            // Update local state
+            group.status = newStatus;
+            group.updatedAt = new Date();
 
-    this.snackBar.open(`Group "${group.name}" status changed to ${this.getStatusDisplayName(newStatus)}`, 'Close', {
-      duration: 3000,
-      panelClass: ['success-snackbar']
-    });
+            this.updateGroups();
+            this.filterGroups();
+
+            this.snackBar.open(`Group "${group.name}" status changed to ${this.getStatusDisplayName(newStatus)}`, 'Close', {
+              duration: 3000,
+              panelClass: ['success-snackbar']
+            });
+          } else {
+            this.snackBar.open(response.message || 'Failed to update group status', 'Close', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error updating group status:', error);
+          this.snackBar.open('Failed to update group status. Please try again.', 'Close', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+        }
+      });
   }
 
   openCreateGroupDialog(): void {
     const dialogRef = this.dialog.open(CreateGroupDialogComponent, {
       width: '500px',
       data: {
-        onCreate: (groupData: Partial<Group>) => {
-          const newGroup: Group = {
-            id: Date.now().toString(),
-            name: groupData.name!,
-            description: groupData.description || '',
-            category: groupData.category!,
-            status: GroupStatus.ACTIVE,
-            createdBy: this.currentUser!.id,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            admins: [this.currentUser!.id], // Creator becomes admin
-            members: [this.currentUser!.id], // Creator becomes first member
-            channels: ['general'], // Default general channel
-            isActive: true,
-            memberCount: 1,
-            maxMembers: groupData.maxMembers || 100
-          };
+        onCreate: (apiGroup: any) => {
+          // Map API Group to models Group
+          const newGroup = this.mapApiGroupToModel(apiGroup);
 
           this.groups.push(newGroup);
           this.updateGroups();
@@ -883,15 +1180,11 @@ export class ManageGroupsComponent implements OnInit {
 
   // Helper methods
   removeGroupFromUsers(groupId: string): void {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    users.forEach((user: User) => {
-      user.groups = user.groups.filter(g => g !== groupId);
-    });
-    localStorage.setItem('users', JSON.stringify(users));
+    // This would typically call UserService to remove group from users
   }
 
   updateGroups(): void {
-    localStorage.setItem('groups', JSON.stringify(this.groups));
+    // No need to store in localStorage - data comes from API
   }
 
   /**
@@ -899,23 +1192,13 @@ export class ManageGroupsComponent implements OnInit {
    * Also updates the channels list if present in memory.
    */
   removeChannelsByGroup(groupId: string): void {
-    const storedChannels = localStorage.getItem('channels');
-    if (!storedChannels) return;
-    const channels = JSON.parse(storedChannels);
-    const remaining = channels.filter((c: any) => c.groupId !== groupId);
-    localStorage.setItem('channels', JSON.stringify(remaining));
+    // This would typically call ChannelService to remove channels by group
   }
 
-  clearFilters(): void {
-    this.searchTerm = '';
-    this.statusFilter = '';
-    this.categoryFilter = '';
-    this.filterGroups();
-  }
 
   // Statistics methods
   getTotalGroupsCount(): number {
-    return this.groups.length;
+    return this.totalGroups;
   }
 
   getActiveGroupsCount(): number {
@@ -929,5 +1212,188 @@ export class ManageGroupsComponent implements OnInit {
   getPendingRequestsCount(): number {
     // Mock implementation - in real app, this would count actual pending join requests
     return this.groups.filter(group => group.status === GroupStatus.PENDING).length;
+  }
+
+  // New filter methods
+  toggleAdvancedFilters(): void {
+    this.showAdvancedFilters = !this.showAdvancedFilters;
+    if (this.showAdvancedFilters && this.creators.length === 0) {
+      this.loadCreators();
+    }
+  }
+
+  loadCreators(): void {
+    // Load unique creators from groups
+    const uniqueCreators = new Map();
+    this.groups.forEach(group => {
+      if (group.createdBy && !uniqueCreators.has(group.createdBy)) {
+        uniqueCreators.set(group.createdBy, {
+          id: group.createdBy,
+          username: this.getCreatorName(group.createdBy)
+        });
+      }
+    });
+    this.creators = Array.from(uniqueCreators.values());
+  }
+
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.statusFilter = '';
+    this.categoryFilter = '';
+    this.privacyFilter = '';
+    this.memberCountFilter = '';
+    this.sortBy = 'createdAt';
+    this.sortOrder = 'desc';
+    this.dateFrom = '';
+    this.dateTo = '';
+    this.createdByFilter = '';
+    this.hasChannelsFilter = '';
+    this.filterGroups();
+  }
+
+  // Enhanced filterGroups method
+  filterGroups(): void {
+    // Reset to first page when filtering
+    this.currentPage = 0;
+
+    // Build filter object for API call
+    const filters: any = {
+      page: this.currentPage + 1,
+      limit: this.pageSize,
+      search: this.searchTerm,
+      status: this.statusFilter,
+      category: this.categoryFilter,
+      sortBy: this.sortBy,
+      sortOrder: this.sortOrder
+    };
+
+    // Add privacy filter
+    if (this.privacyFilter) {
+      filters.isPrivate = this.privacyFilter === 'private';
+    }
+
+    // Add member count filter
+    if (this.memberCountFilter) {
+      switch (this.memberCountFilter) {
+        case 'small':
+          filters.memberCountMin = 1;
+          filters.memberCountMax = 10;
+          break;
+        case 'medium':
+          filters.memberCountMin = 11;
+          filters.memberCountMax = 50;
+          break;
+        case 'large':
+          filters.memberCountMin = 51;
+          break;
+      }
+    }
+
+    // Add date filters
+    if (this.dateFrom) {
+      filters.dateFrom = new Date(this.dateFrom).toISOString();
+    }
+    if (this.dateTo) {
+      filters.dateTo = new Date(this.dateTo).toISOString();
+    }
+
+    // Add creator filter
+    if (this.createdByFilter) {
+      filters.createdBy = this.createdByFilter;
+    }
+
+    // Add channels filter
+    if (this.hasChannelsFilter) {
+      filters.hasChannels = this.hasChannelsFilter === 'yes';
+    }
+
+    this.loadGroupsWithFilters(filters);
+  }
+
+  loadGroupsWithFilters(filters: any): void {
+    this.isLoading = true;
+
+    this.groupService.getAllGroups(filters)
+      .pipe(
+        catchError(error => {
+          console.error('Error loading groups with filters:', error);
+          this.snackBar.open('Failed to load groups.', 'Close', {
+            duration: 3000,
+            panelClass: ['error-snackbar']
+          });
+          this.groups = [];
+          this.filteredGroups = [];
+          this.totalGroups = 0;
+          throw error;
+        }),
+        finalize(() => this.isLoading = false)
+      )
+      .subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            this.groups = response.data.groups.map((apiGroup: any) => this.mapApiGroupToModel(apiGroup));
+            this.filteredGroups = [...this.groups];
+            this.totalGroups = response.data.total;
+            this.totalPages = response.data.pages;
+          } else {
+            this.snackBar.open(response.message || 'Failed to load groups', 'Close', {
+              duration: 3000,
+              panelClass: ['error-snackbar']
+            });
+            this.groups = [];
+            this.filteredGroups = [];
+            this.totalGroups = 0;
+          }
+        },
+        error: (error: any) => {
+          // Error already handled in catchError
+        }
+      });
+  }
+
+  // Export filtered data
+  exportGroups(): void {
+    const data = this.filteredGroups.map(group => ({
+      Name: group.name,
+      Description: group.description,
+      Category: group.category,
+      Status: group.status,
+      'Member Count': group.memberCount || 0,
+      'Channel Count': group.channels?.length || 0,
+      Privacy: group.isPrivate ? 'Private' : 'Public',
+      'Created By': this.getCreatorName(group.createdBy),
+      'Created Date': new Date(group.createdAt).toLocaleDateString(),
+      'Last Updated': new Date(group.updatedAt).toLocaleDateString()
+    }));
+
+    const csv = this.convertToCSV(data);
+    this.downloadCSV(csv, 'groups-export.csv');
+  }
+
+  convertToCSV(data: any[]): string {
+    if (data.length === 0) return '';
+
+    const headers = Object.keys(data[0]);
+    const csvRows = [headers.join(',')];
+
+    data.forEach(row => {
+      const values = headers.map(header => {
+        const value = row[header];
+        return typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
+      });
+      csvRows.push(values.join(','));
+    });
+
+    return csvRows.join('\n');
+  }
+
+  downloadCSV(csv: string, filename: string): void {
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.URL.revokeObjectURL(url);
   }
 }

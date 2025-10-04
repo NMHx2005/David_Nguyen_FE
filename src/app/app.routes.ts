@@ -30,8 +30,12 @@ export const routes: Routes = [
     loadComponent: () => import('./components/auth/Register/register.component').then(m => m.RegisterComponent)
   },
   {
-    path: 'test-auth',
-    loadComponent: () => import('./components/test-auth.component').then(m => m.TestAuthComponent)
+    path: 'error',
+    loadComponent: () => import('./components/shared/ErrorPage/error-page.component').then(m => m.ErrorPageComponent)
+  },
+  {
+    path: '404',
+    loadComponent: () => import('./components/shared/ErrorPage/error-page.component').then(m => m.ErrorPageComponent)
   },
 
   // Authenticated client pages

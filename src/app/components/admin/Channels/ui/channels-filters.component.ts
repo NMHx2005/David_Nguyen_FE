@@ -8,12 +8,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { Group } from '../../../../models/group.model';
-
-export interface ChannelFilters {
-  searchTerm: string;
-  groupId: string;
-  type: string;
-}
+import { ChannelFilters, ChannelType } from '../../../../models/channel.model';
 
 @Component({
   selector: 'app-channels-filters',
@@ -54,11 +49,21 @@ export interface ChannelFilters {
 
             <mat-form-field appearance="outline" class="filter-field">
               <mat-label>Type</mat-label>
-              <mat-select [(ngModel)]="filters.type" (selectionChange)="onFiltersChange.emit(filters)">
-                <mat-option value="">All Types</mat-option>
-                <mat-option value="TEXT">Text</mat-option>
-                <mat-option value="VOICE">Voice</mat-option>
-                <mat-option value="VIDEO">Video</mat-option>
+              <mat-select [(ngModel)]="filters.channelType" (selectionChange)="onFiltersChange.emit(filters)">
+                <mat-option value="all">All Types</mat-option>
+                <mat-option [value]="ChannelType.TEXT">Text</mat-option>
+                <mat-option [value]="ChannelType.VOICE">Voice</mat-option>
+                <mat-option [value]="ChannelType.VIDEO">Video</mat-option>
+              </mat-select>
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="filter-field">
+              <mat-label>Per Page</mat-label>
+              <mat-select [(ngModel)]="filters.limit" (selectionChange)="onFiltersChange.emit(filters)">
+                <mat-option [value]="5">5</mat-option>
+                <mat-option [value]="10">10</mat-option>
+                <mat-option [value]="25">25</mat-option>
+                <mat-option [value]="50">50</mat-option>
               </mat-select>
             </mat-form-field>
 
@@ -114,11 +119,19 @@ export class ChannelsFiltersComponent {
   @Input() filters: ChannelFilters = {
     searchTerm: '',
     groupId: '',
-    type: ''
+    channelType: 'all',
+    isActive: 'all',
+    sortBy: 'name',
+    sortOrder: 'asc',
+    page: 1,
+    limit: 10
   };
   @Input() groups: Group[] = [];
 
   @Output() onFiltersChange = new EventEmitter<ChannelFilters>();
+
+  // Expose ChannelType enum to template
+  ChannelType = ChannelType;
 
   constructor() { }
 
@@ -126,7 +139,12 @@ export class ChannelsFiltersComponent {
     this.filters = {
       searchTerm: '',
       groupId: '',
-      type: ''
+      channelType: 'all',
+      isActive: 'all',
+      sortBy: 'name',
+      sortOrder: 'asc',
+      page: 1,
+      limit: 10
     };
     this.onFiltersChange.emit(this.filters);
   }

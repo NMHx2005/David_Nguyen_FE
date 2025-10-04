@@ -8,7 +8,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatCardModule } from '@angular/material/card';
 import { Group } from '../../../../models/group.model';
-import { Channel } from '../../../../models/channel.model';
+import { Channel, ChannelType } from '../../../../models/channel.model';
 
 export interface CreateChannelDialogData {
   groups: Group[];
@@ -63,10 +63,9 @@ export interface CreateChannelDialogData {
           <mat-form-field appearance="outline" class="full-width">
             <mat-label>Channel Type</mat-label>
             <mat-select formControlName="type">
-              <mat-option value="">Select Type</mat-option>
-              <mat-option value="TEXT">Text Channel</mat-option>
-              <mat-option value="VOICE">Voice Channel</mat-option>
-              <mat-option value="VIDEO">Video Channel</mat-option>
+              <mat-option [value]="ChannelType.TEXT">Text Channel</mat-option>
+              <mat-option [value]="ChannelType.VOICE">Voice Channel</mat-option>
+              <mat-option [value]="ChannelType.VIDEO">Video Channel</mat-option>
             </mat-select>
             <mat-error *ngIf="channelForm.get('type')?.hasError('required')">
               Channel type is required
@@ -128,6 +127,9 @@ export interface CreateChannelDialogData {
 export class CreateChannelDialogComponent {
   channelForm: FormGroup;
 
+  // Expose ChannelType enum to template
+  ChannelType = ChannelType;
+
   constructor(
     public dialogRef: MatDialogRef<CreateChannelDialogComponent>,
     private fb: FormBuilder,
@@ -136,7 +138,7 @@ export class CreateChannelDialogComponent {
     this.channelForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(30)]],
       groupId: ['', Validators.required],
-      type: ['TEXT', Validators.required],
+      type: [ChannelType.TEXT, Validators.required],
       description: ['', Validators.maxLength(200)],
       maxMembers: [100, [Validators.min(1), Validators.max(1000)]]
     });

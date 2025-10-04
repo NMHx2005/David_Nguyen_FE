@@ -6,21 +6,21 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatCardModule } from '@angular/material/card';
-import { GroupInterestRequest } from '../services/group-requests.service';
+import { GroupInterestRequest } from '../../../../models/group.model';
 
 @Component({
-    selector: 'app-group-requests-table',
-    standalone: true,
-    imports: [
-        CommonModule,
-        MatTableModule,
-        MatButtonModule,
-        MatIconModule,
-        MatChipsModule,
-        MatTooltipModule,
-        MatCardModule
-    ],
-    template: `
+  selector: 'app-group-requests-table',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatTableModule,
+    MatButtonModule,
+    MatIconModule,
+    MatChipsModule,
+    MatTooltipModule,
+    MatCardModule
+  ],
+  template: `
     <mat-card class="requests-table-card">
       <mat-card-header>
         <mat-card-title>
@@ -129,7 +129,7 @@ import { GroupInterestRequest } from '../services/group-requests.service';
       </mat-card-content>
     </mat-card>
   `,
-    styles: [`
+  styles: [`
     .requests-table-card {
       margin-bottom: 24px;
     }
@@ -248,80 +248,79 @@ import { GroupInterestRequest } from '../services/group-requests.service';
   `]
 })
 export class GroupRequestsTableComponent {
-    @Input() requests: GroupInterestRequest[] = [];
-    @Output() onApproveRequest = new EventEmitter<GroupInterestRequest>();
-    @Output() onRejectRequest = new EventEmitter<GroupInterestRequest>();
+  @Input() requests: GroupInterestRequest[] = [];
+  @Output() onApproveRequest = new EventEmitter<GroupInterestRequest>();
+  @Output() onRejectRequest = new EventEmitter<GroupInterestRequest>();
 
-    displayedColumns = ['user', 'group', 'type', 'status', 'requestedAt', 'actions'];
+  displayedColumns = ['user', 'group', 'type', 'status', 'requestedAt', 'actions'];
 
-    constructor() { }
+  constructor() { }
 
-    getRequestTypeColor(type: string): string {
-        switch (type) {
-            case 'register_interest': return 'primary';
-            case 'request_invite': return 'accent';
-            default: return 'primary';
-        }
+  getRequestTypeColor(type: string): string {
+    switch (type) {
+      case 'register_interest': return 'primary';
+      case 'request_invite': return 'accent';
+      default: return 'primary';
     }
+  }
 
-    getRequestTypeIcon(type: string): string {
-        switch (type) {
-            case 'register_interest': return 'person_add';
-            case 'request_invite': return 'mail';
-            default: return 'help';
-        }
+  getRequestTypeIcon(type: string): string {
+    switch (type) {
+      case 'register_interest': return 'person_add';
+      case 'request_invite': return 'mail';
+      default: return 'help';
     }
+  }
 
-    getRequestTypeLabel(type: string): string {
-        switch (type) {
-            case 'register_interest': return 'Register Interest';
-            case 'request_invite': return 'Request Invite';
-            default: return 'Unknown';
-        }
+  getRequestTypeLabel(type: string): string {
+    switch (type) {
+      case 'register_interest': return 'Register Interest';
+      case 'request_invite': return 'Request Invite';
+      default: return 'Unknown';
     }
+  }
 
-    getStatusColor(status: string): string {
-        switch (status) {
-            case 'pending': return 'warn';
-            case 'approved': return 'primary';
-            case 'rejected': return 'accent';
-            default: return 'primary';
-        }
+  getStatusColor(status: string): string {
+    switch (status) {
+      case 'pending': return 'warn';
+      case 'approved': return 'primary';
+      case 'rejected': return 'accent';
+      default: return 'primary';
     }
+  }
 
-    getStatusIcon(status: string): string {
-        switch (status) {
-            case 'pending': return 'pending';
-            case 'approved': return 'check_circle';
-            case 'rejected': return 'cancel';
-            default: return 'help';
-        }
+  getStatusIcon(status: string): string {
+    switch (status) {
+      case 'pending': return 'pending';
+      case 'approved': return 'check_circle';
+      case 'rejected': return 'cancel';
+      default: return 'help';
     }
+  }
 
-    getStatusLabel(status: string): string {
-        switch (status) {
-            case 'pending': return 'Pending';
-            case 'approved': return 'Approved';
-            case 'rejected': return 'Rejected';
-            default: return 'Unknown';
-        }
+  getStatusLabel(status: string): string {
+    switch (status) {
+      case 'pending': return 'Pending';
+      case 'approved': return 'Approved';
+      case 'rejected': return 'Rejected';
+      default: return 'Unknown';
     }
+  }
 
-    getReviewerName(reviewerId: string | null): string {
-        if (!reviewerId) return 'Unknown';
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const reviewer = users.find((u: any) => u.id === reviewerId);
-        return reviewer ? reviewer.username : 'Unknown';
-    }
+  getReviewerName(reviewerId: string | null): string {
+    if (!reviewerId) return 'Unknown';
+    // This would typically come from UserService
+    return 'Unknown';
+  }
 
-    formatDate(date: Date | null): string {
-        if (!date) return 'N/A';
-        return new Date(date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    }
+  formatDate(date: Date | null): string {
+    if (!date) return 'N/A';
+    return new Date(date).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
 }

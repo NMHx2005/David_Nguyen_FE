@@ -107,8 +107,15 @@ export class SimpleAdminLayoutComponent implements OnInit {
     console.log('Current user:', this.authService.getCurrentUser());
   }
 
-  logout(): void {
-    this.authService.logout();
-    this.router.navigate(['/login']);
+  async logout(): Promise<void> {
+    try {
+      await this.authService.logout();
+      console.log('Logout successful');
+      this.router.navigate(['/login']);
+    } catch (error: any) {
+      console.error('Logout error:', error);
+      // Navigate to login even if logout request fails
+      this.router.navigate(['/login']);
+    }
   }
 }

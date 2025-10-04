@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatChipsModule } from '@angular/material/chips';
-import { ClientChannelFilters } from '../services/channels.service';
+import { ClientChannelFilters } from '../../../../models/channel.model';
 
 @Component({
   selector: 'app-channels-search',
@@ -28,7 +28,7 @@ import { ClientChannelFilters } from '../services/channels.service';
       </mat-form-field>
       
       <div class="filter-chips">
-        <mat-chip-listbox [(ngModel)]="filters.selectedType" (ngModelChange)="onFiltersChange()">
+        <mat-chip-listbox [(ngModel)]="filters.channelType" (ngModelChange)="onFiltersChange()">
           <mat-chip-option value="">All Types</mat-chip-option>
           <mat-chip-option value="text">Text</mat-chip-option>
           <mat-chip-option value="voice">Voice</mat-chip-option>
@@ -68,7 +68,13 @@ import { ClientChannelFilters } from '../services/channels.service';
   `]
 })
 export class ChannelsSearchComponent {
-  @Input() filters: ClientChannelFilters = { searchTerm: '', selectedType: '' };
+  @Input() filters: ClientChannelFilters = {
+    searchTerm: '',
+    groupId: '',
+    channelType: 'all',
+    sortBy: 'name',
+    sortOrder: 'asc'
+  };
 
   @Output() filtersChange = new EventEmitter<ClientChannelFilters>();
 

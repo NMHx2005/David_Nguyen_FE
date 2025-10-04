@@ -45,7 +45,7 @@ import { User } from '../../../../models/user.model';
               </div>
               <div class="meta-item">
                 <mat-icon>chat</mat-icon>
-                <span>{{ group.channels.length || 0 }} channels</span>
+                <span>{{ group.channels?.length || 0 }} channels</span>
               </div>
             </div>
             

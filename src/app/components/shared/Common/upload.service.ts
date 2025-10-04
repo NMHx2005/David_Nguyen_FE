@@ -3,6 +3,7 @@ import { HttpClient, HttpEvent, HttpEventType, HttpProgressEvent } from '@angula
 import { Observable, BehaviorSubject } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { environment } from '../../../../environments/environment';
+import { ApiService } from '../../../services/api.service';
 
 export interface UploadProgress {
     loaded: number;
@@ -46,7 +47,10 @@ export class UploadService {
     private uploadProgressSubject = new BehaviorSubject<UploadProgress>({ loaded: 0, total: 0, percentage: 0 });
     public uploadProgress$ = this.uploadProgressSubject.asObservable();
 
-    constructor(private http: HttpClient) { }
+    constructor(
+        private http: HttpClient,
+        private apiService: ApiService
+    ) { }
 
     // Upload avatar
     uploadAvatar(file: File): Observable<UploadResponse> {

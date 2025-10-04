@@ -69,13 +69,21 @@ export interface UserFormData {
           <mat-form-field appearance="outline" class="full-width">
             <mat-label>Role</mat-label>
             <mat-select formControlName="role">
-              <mat-option value="USER">User</mat-option>
-              <mat-option value="GROUP_ADMIN">Group Admin</mat-option>
-              <mat-option value="SUPER_ADMIN" *ngIf="data.canCreateSuperAdmin">Super Admin</mat-option>
+              <mat-option value="user">User</mat-option>
+              <mat-option value="group_admin">Group Admin</mat-option>
+              <mat-option value="super_admin" *ngIf="data.canCreateSuperAdmin">Super Admin</mat-option>
             </mat-select>
             <mat-error *ngIf="userForm.get('role')?.hasError('required')">
               Role is required
             </mat-error>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="full-width" *ngIf="data.isEditMode">
+            <mat-label>Status</mat-label>
+            <mat-select formControlName="isActive">
+              <mat-option [value]="true">Active</mat-option>
+              <mat-option [value]="false">Inactive</mat-option>
+            </mat-select>
           </mat-form-field>
         </form>
       </mat-dialog-content>
@@ -123,7 +131,8 @@ export class UserFormDialogComponent implements OnInit {
       username: ['', [Validators.required, Validators.minLength(3)]],
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]],
-      role: ['USER', Validators.required]
+      role: ['user', Validators.required],
+      isActive: [true]
     });
   }
 
@@ -133,7 +142,8 @@ export class UserFormDialogComponent implements OnInit {
       this.userForm.patchValue({
         username: this.data.user.username,
         email: this.data.user.email,
-        role: this.data.user.roles[0] || 'USER'
+        role: this.data.user.roles[0] || 'user',
+        isActive: this.data.user.isActive
       });
 
       // Remove password validation for edit mode
@@ -145,6 +155,11 @@ export class UserFormDialogComponent implements OnInit {
   onSubmit(): void {
     if (this.userForm.valid) {
       const formData = this.userForm.value;
+      // Convert role string to array for API compatibility
+      if (formData.role) {
+        formData.roles = [formData.role];
+        delete formData.role;
+      }
       this.dialogRef.close(formData);
     }
   }

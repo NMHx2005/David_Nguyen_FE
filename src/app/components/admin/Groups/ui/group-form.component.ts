@@ -99,6 +99,23 @@ import { Group, GroupStatus } from '../../../../models/group.model';
             Max members must not exceed 1000
           </mat-error>
         </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Privacy</mat-label>
+          <mat-select formControlName="isPrivate">
+            <mat-option [value]="false">Public</mat-option>
+            <mat-option [value]="true">Private</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Tags (comma-separated)</mat-label>
+          <input matInput 
+                 formControlName="tags" 
+                 placeholder="art, design, creative"
+                 maxlength="200">
+          <mat-hint align="end">{{ groupForm.get('tags')?.value?.length || 0 }}/200</mat-hint>
+        </mat-form-field>
       </div>
 
       <div class="form-actions">
@@ -108,7 +125,7 @@ import { Group, GroupStatus } from '../../../../models/group.model';
         <button mat-raised-button 
                 color="primary" 
                 type="submit" 
-                [disabled]="!groupForm.valid || groupForm.pristine">
+                [disabled]="!groupForm.valid">
           <mat-icon>save</mat-icon>
           {{ isEditMode ? 'Update Group' : 'Create Group' }}
         </button>
@@ -182,26 +199,43 @@ export class GroupFormComponent implements OnInit, OnChanges {
       description: ['', Validators.maxLength(500)],
       category: ['', Validators.required],
       status: [GroupStatus.ACTIVE, Validators.required],
-      maxMembers: [100, [Validators.min(1), Validators.max(1000)]]
+      maxMembers: [100, [Validators.min(1), Validators.max(1000)]],
+      isPrivate: [false],
+      tags: ['', Validators.maxLength(200)]
     });
   }
 
   populateForm(): void {
     if (this.group) {
+      console.log('Populating group form with data:', this.group);
       this.groupForm.patchValue({
         name: this.group.name,
         description: this.group.description || '',
-        category: this.group.category,
-        status: this.group.status,
-        maxMembers: this.group.maxMembers || 100
+        category: this.group.category || 'general',
+        status: this.group.status || GroupStatus.ACTIVE,
+        maxMembers: this.group.maxMembers || 100,
+        isPrivate: this.group.isPrivate || false,
+        tags: this.group.tags ? this.group.tags.join(', ') : ''
       });
-      this.groupForm.markAsPristine(); // Mark as pristine after populating
+      // Don't mark as pristine immediately - let user make changes
+      console.log('Form after population:', this.groupForm.value);
+      console.log('Form valid:', this.groupForm.valid);
+      console.log('Form pristine:', this.groupForm.pristine);
     }
   }
 
   onSubmit(): void {
     if (this.groupForm.valid) {
-      this.formSubmit.emit(this.groupForm.value);
+      const formData = { ...this.groupForm.value };
+
+      // Convert tags string to array
+      if (formData.tags) {
+        formData.tags = formData.tags.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0);
+      } else {
+        formData.tags = [];
+      }
+
+      this.formSubmit.emit(formData);
     }
   }
 }

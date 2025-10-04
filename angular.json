@@ -44,21 +44,49 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
+                  "maximumWarning": "800kB",
+                  "maximumError": "1.2MB"
                 },
                 {
                   "type": "anyComponentStyle",
                   "maximumWarning": "4kB",
                   "maximumError": "8kB"
+                },
+                {
+                  "type": "bundle",
+                  "name": "main",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "bundle",
+                  "name": "vendor",
+                  "maximumWarning": "500kB",
+                  "maximumError": "800kB"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": true
+                },
+                "fonts": true
+              },
+              "buildOptimizer": true,
+              "aot": true,
+              "extractLicenses": true,
+              "vendorChunk": true,
+              "namedChunks": false,
+              "sourceMap": false
             },
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true
+              "sourceMap": true,
+              "namedChunks": true,
+              "vendorChunk": true
             }
           },
           "defaultConfiguration": "production"

@@ -66,6 +66,16 @@ export interface LoginFormData {
               </mat-error>
             </mat-form-field>
 
+            <div class="forgot-password">
+              <button mat-button 
+                      type="button"
+                      (click)="onForgotPasswordClick.emit()"
+                      class="forgot-password-link">
+                <mat-icon>help</mat-icon>
+                Forgot Password?
+              </button>
+            </div>
+
             <div class="form-actions">
               <button mat-raised-button 
                       color="primary" 
@@ -79,23 +89,6 @@ export interface LoginFormData {
             </div>
           </form>
 
-          <div class="demo-accounts" *ngIf="showDemoAccounts">
-            <mat-divider></mat-divider>
-            <div class="demo-section">
-              <h4>Demo Accounts:</h4>
-              <div class="demo-buttons">
-                <button mat-stroked-button (click)="fillDemoAccount('super')">
-                  Super Admin
-                </button>
-                <button mat-stroked-button (click)="fillDemoAccount('admin')">
-                  Group Admin
-                </button>
-                <button mat-stroked-button (click)="fillDemoAccount('user')">
-                  Regular User
-                </button>
-              </div>
-            </div>
-          </div>
 
           <div class="auth-links">
             <p>Don't have an account? 
@@ -162,6 +155,20 @@ export interface LoginFormData {
       width: 100%;
     }
 
+    .forgot-password {
+      text-align: right;
+      margin-bottom: 16px;
+    }
+
+    .forgot-password-link {
+      color: #1976d2;
+      font-size: 0.875rem;
+    }
+
+    .forgot-password-link:hover {
+      background-color: rgba(25, 118, 210, 0.04);
+    }
+
     .form-actions {
       margin-top: 24px;
     }
@@ -181,28 +188,6 @@ export interface LoginFormData {
       to { transform: rotate(360deg); }
     }
 
-    .demo-accounts {
-      margin-top: 32px;
-    }
-
-    .demo-section h4 {
-      margin: 16px 0 12px 0;
-      color: #666;
-      font-size: 0.9rem;
-      font-weight: 500;
-    }
-
-    .demo-buttons {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .demo-buttons button {
-      font-size: 0.8rem;
-      min-width: auto;
-      padding: 4px 12px;
-    }
 
     .auth-links {
       text-align: center;
@@ -225,23 +210,16 @@ export interface LoginFormData {
         padding: 10px;
       }
 
-      .demo-buttons {
-        flex-direction: column;
-      }
-
-      .demo-buttons button {
-        width: 100%;
-      }
     }
   `]
 })
 export class LoginFormComponent implements OnInit {
   @Input() isLoading = false;
   @Input() successMessage = '';
-  @Input() showDemoAccounts = true;
 
   @Output() onSubmit = new EventEmitter<LoginFormData>();
   @Output() onRegisterClick = new EventEmitter<void>();
+  @Output() onForgotPasswordClick = new EventEmitter<void>();
 
   loginForm!: FormGroup;
 
@@ -264,17 +242,5 @@ export class LoginFormComponent implements OnInit {
     }
   }
 
-  fillDemoAccount(accountType: string): void {
-    const accounts = {
-      super: { username: 'super', password: '123' },
-      admin: { username: 'admin', password: '123' },
-      user: { username: 'user', password: '123' }
-    };
-
-    const account = accounts[accountType as keyof typeof accounts];
-    if (account) {
-      this.loginForm.patchValue(account);
-    }
-  }
 }
 

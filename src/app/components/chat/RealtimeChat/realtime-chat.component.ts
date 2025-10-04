@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewChecked, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewChecked, ChangeDetectorRef, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -14,17 +14,20 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { TextFieldModule } from '@angular/cdk/text-field';
 import { ImageUploadComponent } from '../../shared/Common/image-upload.component';
-import { VideoCallButtonComponent } from '../../video-call/VideoCall/ui/video-call-button.component';
-import { VideoCallComponent } from '../../video-call/VideoCall/video-call.component';
+import { MessageDisplayComponent } from '../../shared/Common/message-display.component';
+import { VideoCallComponent } from '../../video-call/video-call.component';
+import { VideoCallButtonComponent } from '../../video-call/video-call-button.component';
 import { AuthService } from '../../auth/auth.service';
-import { SocketService, SocketMessage, SocketUser, ChannelUsers, TypingUser } from '../socket.service';
-import { VideoCallService } from '../../video-call/VideoCall/services/video-call.service';
-import { ChannelsService } from '../../client/Channels/services/channels.service';
-import { GroupsInterestService } from '../../client/Groups/services/groups-interest.service';
-import { UploadService, UploadResponse } from '../../shared/Common/upload.service';
+import { SocketService, SocketMessage, UserPresence, ChannelJoin, ChannelLeave, TypingIndicator } from '../../../services/socket.service';
+import { MessageService, Message, MessageSearchResponse } from '../../../services/message.service';
+import { VideoCallService } from '../../../services/video-call.service';
+import { ChannelService } from '../../../services/channel.service';
+import { GroupService } from '../../../services/group.service';
+import { UploadService, UploadResponse, UploadProgress } from '../../shared/Common/upload.service';
 import { Group } from '../../../models/group.model';
 import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
 import { MatDialog } from '@angular/material/dialog';
@@ -58,9 +61,11 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
     MatBadgeModule,
     MatChipsModule,
     MatProgressSpinnerModule,
+    MatProgressBarModule,
     MatSnackBarModule,
     TextFieldModule,
     ImageUploadComponent,
+    MessageDisplayComponent,
     VideoCallButtonComponent,
     ClientLayoutComponent
   ],
@@ -97,7 +102,7 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
                     <mat-icon matListItemIcon>group_work</mat-icon>
                     <span matListItemTitle>{{ group.name }}</span>
                     <span matListItemLine>{{ group.description }}</span>
-                    <mat-badge [matBadge]="group.channels.length" matBadgeColor="primary" matBadgeSize="small">
+                    <mat-badge [matBadge]="group.channels.length || 0" matBadgeColor="primary" matBadgeSize="small">
                       <mat-icon>chat</mat-icon>
                     </mat-badge>
                   </a>
@@ -130,11 +135,11 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
               <h2>Welcome to Real-time Chat</h2>
               <p>Select a group and channel to start chatting</p>
               <div class="connection-status">
-                <mat-icon [class]="socketService.isSocketConnected ? 'connected' : 'disconnected'">
-                  {{ socketService.isSocketConnected ? 'wifi' : 'wifi_off' }}
+                <mat-icon [class]="socketService.isSocketConnected() ? 'connected' : 'disconnected'">
+                  {{ socketService.isSocketConnected() ? 'wifi' : 'wifi_off' }}
                 </mat-icon>
-                <span [class]="socketService.isSocketConnected ? 'connected' : 'disconnected'">
-                  {{ socketService.isSocketConnected ? 'Connected' : 'Disconnected' }}
+                <span [class]="socketService.isSocketConnected() ? 'connected' : 'disconnected'">
+                  {{ socketService.isSocketConnected() ? 'Connected' : 'Disconnected' }}
                 </span>
               </div>
             </mat-card>
@@ -159,21 +164,43 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
                   <div class="channel-stats">
                     <div class="online-users">
                       <mat-icon>people</mat-icon>
-                      <span>{{ channelUsers?.users?.length || 0 }} online</span>
+                      <span>{{ getOnlineUsersCount() }} online</span>
                     </div>
                     <div class="typing-indicator" *ngIf="typingUsers.length > 0">
                       <span>{{ getTypingText() }}</span>
                     </div>
+                    <app-video-call-button 
+                      [channelId]="selectedChannel._id || ''"
+                      [receiverId]="getChannelReceiverId()"
+                      [receiverName]="getChannelReceiverName()"
+                      [canMakeCall]="canMakeVideoCall()"
+                      (callStarted)="onVideoCallStarted()">
+                    </app-video-call-button>
                     <button mat-icon-button (click)="toggleUserList()" matTooltip="Show online users">
                       <mat-icon>list</mat-icon>
                     </button>
                   </div>
                 </div>
+
+                <!-- Search Section -->
+                <div class="search-section" *ngIf="selectedChannel">
+                  <mat-form-field appearance="outline" class="search-field">
+                    <mat-label>Search messages...</mat-label>
+                    <input matInput 
+                           [(ngModel)]="searchQuery" 
+                           (keydown.enter)="searchMessages()"
+                           placeholder="Search messages in this channel">
+                    <mat-icon matSuffix (click)="searchMessages()">search</mat-icon>
+                  </mat-form-field>
+                  <button mat-icon-button (click)="clearSearch()" *ngIf="searchQuery" matTooltip="Clear search">
+                    <mat-icon>clear</mat-icon>
+                  </button>
+                </div>
               </mat-card>
             </div>
 
             <!-- Online Users List -->
-            <div *ngIf="showUserList && channelUsers?.users" class="users-list">
+            <div *ngIf="showUserList" class="users-list">
               <mat-card class="users-card">
                 <mat-card-header>
                   <mat-card-title>Online Users</mat-card-title>
@@ -183,16 +210,17 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
                 </mat-card-header>
                 <mat-card-content>
                   <mat-list>
-                    <mat-list-item *ngFor="let user of channelUsers!.users" class="user-item">
+                    <mat-list-item *ngFor="let user of getOnlineUsers()" class="user-item">
                       <div class="user-info">
                         <mat-icon matListItemIcon>person</mat-icon>
                         <span matListItemTitle>{{ user.username }}</span>
-                        <span matListItemLine [class]="user.isOnline ? 'online' : 'offline'">
-                          {{ user.isOnline ? 'Online' : 'Offline' }}
+                        <span matListItemLine [class]="user.status === 'online' ? 'online' : 'offline'">
+                          {{ user.status === 'online' ? 'Online' : 'Offline' }}
                         </span>
                       </div>
                       <div class="user-actions">
-                        <app-video-call-button
+                        <!-- Video call button commented out - component not fully implemented -->
+                        <!-- <app-video-call-button
                           [userId]="user.userId"
                           [username]="user.username"
                           [channelId]="selectedChannel._id"
@@ -200,7 +228,10 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
                           [isOnline]="user.isOnline"
                           buttonType="initiate"
                           (videoCallInitiated)="onVideoCallInitiated($event)">
-                        </app-video-call-button>
+                        </app-video-call-button> -->
+                        <button mat-icon-button matTooltip="Video Call (Coming Soon)">
+                          <mat-icon>videocam</mat-icon>
+                        </button>
                       </div>
                     </mat-list-item>
                   </mat-list>
@@ -210,49 +241,66 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
 
             <!-- Messages Area -->
             <div class="messages-container" #messagesContainer>
+              <!-- Load More Messages Button -->
+              <div *ngIf="hasMoreMessages && !loadingMessages" class="load-more-container">
+                <button mat-stroked-button (click)="loadMoreMessages()" [disabled]="isLoadingMoreMessages">
+                  <mat-icon *ngIf="!isLoadingMoreMessages">keyboard_arrow_up</mat-icon>
+                  <mat-spinner *ngIf="isLoadingMoreMessages" diameter="20"></mat-spinner>
+                  {{ isLoadingMoreMessages ? 'Loading...' : 'Load more messages' }}
+                </button>
+              </div>
+
               <div *ngIf="loadingMessages" class="loading-messages">
                 <mat-spinner diameter="30"></mat-spinner>
                 <p>Loading messages...</p>
               </div>
 
-              <div *ngIf="!loadingMessages && messages.length === 0" class="no-messages">
+              <div *ngIf="!loadingMessages && messages.length === 0 && !showSearchResults" class="no-messages">
                 <mat-icon>chat_bubble_outline</mat-icon>
                 <p>No messages yet. Start the conversation!</p>
               </div>
 
-              <div *ngIf="!loadingMessages && messages.length > 0" class="messages-list">
-                <div *ngFor="let message of messages; trackBy: trackByMessageId" 
-                     class="message-item"
-                     [class.own-message]="getUserId(message) === currentUserId">
-                  
-                  <div class="message-avatar">
-                    <img *ngIf="getUserAvatar(message)" 
-                         [src]="getUserAvatar(message)" 
-                         [alt]="getUsername(message)"
-                         class="avatar">
-                    <div *ngIf="!getUserAvatar(message)" class="default-avatar">
-                      {{ getUsername(message).charAt(0).toUpperCase() }}
-                    </div>
-                  </div>
-
-                  <div class="message-content">
-                    <div class="message-header">
-                      <span class="username">{{ getUsername(message) }}</span>
-                      <span class="timestamp">{{ formatTime(message.message.createdAt) }}</span>
-                    </div>
-                    
-                    <div class="message-text">
-                      <p *ngIf="message.message.type === 'text'">{{ getMessageText(message) }}</p>
-                      <div *ngIf="message.message.type === 'image'" class="message-image">
-                        <img [src]="message.message.imageUrl" [alt]="getMessageText(message)">
-                      </div>
-                      <div *ngIf="message.message.type === 'file'" class="message-file">
-                        <mat-icon>attach_file</mat-icon>
-                        <a [href]="message.message.fileUrl" target="_blank">{{ getMessageText(message) }}</a>
-                      </div>
-                    </div>
+              <!-- Search Results -->
+              <div *ngIf="showSearchResults" class="search-results">
+                <div class="search-results-header">
+                  <h4>Search Results ({{ searchResults.length }})</h4>
+                  <button mat-icon-button (click)="clearSearch()" matTooltip="Close search">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                </div>
+                <div *ngIf="isSearching" class="search-loading">
+                  <mat-spinner diameter="20"></mat-spinner>
+                  <span>Searching...</span>
+                </div>
+                <div *ngIf="!isSearching && searchResults.length === 0" class="no-search-results">
+                  <mat-icon>search_off</mat-icon>
+                  <p>No messages found for "{{ searchQuery }}"</p>
+                </div>
+                <div *ngIf="!isSearching && searchResults.length > 0" class="search-results-list">
+                  <app-message-display
+                    *ngFor="let message of searchResults; trackBy: trackByMessageId"
+                    [message]="mapMessageToSocketMessage(message)"
+                    [currentUserId]="currentUserId"
+                    [showActions]="true">
+                  </app-message-display>
+                  <div *ngIf="searchPage < searchTotalPages" class="load-more-search">
+                    <button mat-stroked-button (click)="loadMoreSearchResults()" [disabled]="isSearching">
+                      <mat-icon *ngIf="!isSearching">keyboard_arrow_down</mat-icon>
+                      <mat-spinner *ngIf="isSearching" diameter="20"></mat-spinner>
+                      {{ isSearching ? 'Loading...' : 'Load more results' }}
+                    </button>
                   </div>
                 </div>
+              </div>
+
+              <!-- Regular Messages -->
+              <div *ngIf="!loadingMessages && messages.length > 0 && !showSearchResults" class="messages-list">
+                <app-message-display
+                  *ngFor="let message of messages; trackBy: trackByMessageId"
+                  [message]="message"
+                  [currentUserId]="currentUserId"
+                  [showActions]="true">
+                </app-message-display>
               </div>
             </div>
 
@@ -274,28 +322,65 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
                               cdkAutosizeMinRows="1"
                               cdkAutosizeMaxRows="4">
                     </textarea>
-                    <mat-hint align="end">{{ newMessage?.length || 0 }}/1000</mat-hint>
+                    <mat-hint align="end">{{ newMessage.length || 0 }}/1000</mat-hint>
                   </mat-form-field>
                   
                   <div class="input-actions">
+                    <!-- File Upload Button -->
+                    <input #fileInput 
+                           type="file" 
+                           accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar"
+                           (change)="onFileSelected($event.target.files?.[0] || null)"
+                           style="display: none">
+                    
+                    <button mat-icon-button 
+                            (click)="fileInput.click()"
+                            matTooltip="Upload file"
+                            [disabled]="isUploading">
+                      <mat-icon>attach_file</mat-icon>
+                    </button>
+                    
                     <app-image-upload
-                      (imageUploaded)="onImageUploaded($event)"
-                      (uploadError)="onUploadError($event)">
+                      (imageSelected)="onImageSelected($event)"
+                      (uploadError)="onUploadError($event)"
+                      tooltip="Upload image"
+                      icon="image">
                     </app-image-upload>
                     
-                    <button mat-icon-button matTooltip="Emoji" class="emoji-button">
+                    <button mat-icon-button matTooltip="Emoji" class="emoji-button" [disabled]="isUploading">
                       <mat-icon>emoji_emotions</mat-icon>
                     </button>
                     
                     <button mat-fab 
                             color="primary" 
                             (click)="sendMessage()"
-                            [disabled]="!newMessage.trim() || !socketService.isSocketConnected"
+                            [disabled]="!newMessage.trim() || !socketService.isSocketConnected || isUploading"
                             class="send-button">
                       <mat-icon>send</mat-icon>
                     </button>
                   </div>
                 </div>
+              </mat-card>
+            </div>
+
+            <!-- Upload Progress Indicator -->
+            <div *ngIf="isUploading" class="upload-progress">
+              <mat-card class="upload-progress-card">
+                <mat-card-content>
+                  <div class="upload-info">
+                    <mat-icon>{{ uploadType === 'image' ? 'image' : 'attach_file' }}</mat-icon>
+                    <div class="upload-details">
+                      <span class="upload-filename">{{ uploadingFileName }}</span>
+                      <span class="upload-type">{{ uploadType === 'image' ? 'Image' : 'File' }} upload</span>
+                    </div>
+                    <span class="upload-percentage">{{ uploadProgress.percentage }}%</span>
+                  </div>
+                  <mat-progress-bar 
+                    mode="determinate" 
+                    [value]="uploadProgress.percentage"
+                    class="upload-progress-bar">
+                  </mat-progress-bar>
+                </mat-card-content>
               </mat-card>
             </div>
           </div>
@@ -513,97 +598,6 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
       padding: 16px;
     }
 
-    .message-item {
-      display: flex;
-      margin-bottom: 16px;
-      gap: 12px;
-    }
-
-    .message-item.own-message {
-      flex-direction: row-reverse;
-    }
-
-    .message-item.own-message .message-content {
-      background-color: #2196f3;
-      color: white;
-    }
-
-    .message-avatar {
-      width: 40px;
-      height: 40px;
-      flex-shrink: 0;
-    }
-
-    .avatar {
-      width: 100%;
-      height: 100%;
-      border-radius: 50%;
-      object-fit: cover;
-    }
-
-    .default-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      font-size: 16px;
-    }
-
-    .message-content {
-      background-color: #f5f5f5;
-      padding: 12px 16px;
-      border-radius: 18px;
-      max-width: 70%;
-    }
-
-    .message-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-
-    .username {
-      font-weight: 500;
-      font-size: 14px;
-    }
-
-    .timestamp {
-      font-size: 12px;
-      opacity: 0.7;
-    }
-
-    .message-text p {
-      margin: 0;
-      word-wrap: break-word;
-    }
-
-    .message-image img {
-      max-width: 200px;
-      max-height: 200px;
-      border-radius: 8px;
-    }
-
-    .message-file {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .message-file a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .message-file a:hover {
-      text-decoration: underline;
-    }
-
     .message-input {
       flex-shrink: 0;
       position: relative;
@@ -710,6 +704,152 @@ interface GroupWithChannels extends Omit<Group, 'channels'> {
       color: #f44336;
     }
 
+    /* Search section styles */
+    .search-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .search-field {
+      flex: 1;
+    }
+
+    .search-field ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+      display: none;
+    }
+
+    /* Search results styles */
+    .search-results {
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin: 8px;
+      padding: 16px;
+    }
+
+    .search-results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .search-results-header h4 {
+      margin: 0;
+      color: #333;
+    }
+
+    .search-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px;
+      justify-content: center;
+    }
+
+    .no-search-results {
+      text-align: center;
+      padding: 32px;
+      color: #666;
+    }
+
+    .no-search-results mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .search-results-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .load-more-search {
+      text-align: center;
+      padding: 16px 0;
+    }
+
+    /* Load more messages styles */
+    .load-more-container {
+      text-align: center;
+      padding: 16px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .load-more-container button {
+      min-width: 200px;
+    }
+
+    /* Upload progress styles */
+    .upload-progress {
+      margin-top: 8px;
+    }
+
+    .upload-progress-card {
+      background: #f8f9fa;
+      border: 1px solid #e0e0e0;
+    }
+
+    .upload-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .upload-info mat-icon {
+      color: #666;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .upload-details {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .upload-filename {
+      font-weight: 500;
+      color: #333;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+    }
+
+    .upload-type {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .upload-percentage {
+      font-weight: 600;
+      color: #1976d2;
+      font-size: 14px;
+      min-width: 40px;
+      text-align: right;
+    }
+
+    .upload-progress-bar {
+      height: 4px;
+      border-radius: 2px;
+    }
+
+    .upload-progress-bar ::ng-deep .mat-mdc-progress-bar-buffer {
+      background-color: #e0e0e0;
+    }
+
+    .upload-progress-bar ::ng-deep .mat-mdc-progress-bar-fill::after {
+      background-color: #1976d2;
+    }
+
     /* Video call dialog styles */
     :host ::ng-deep .video-call-dialog .mat-dialog-container {
       padding: 0;
@@ -727,14 +867,16 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   // Services
   authService = inject(AuthService);
   socketService = inject(SocketService);
-  channelsService = inject(ChannelsService);
-  groupsService = inject(GroupsInterestService);
+  messageService = inject(MessageService);
+  channelService = inject(ChannelService);
+  groupService = inject(GroupService);
   uploadService = inject(UploadService);
   videoCallService = inject(VideoCallService);
   snackBar = inject(MatSnackBar);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private dialog = inject(MatDialog);
+  private cdr = inject(ChangeDetectorRef);
 
   // ViewChild
   @ViewChild('messagesContainer') messagesContainer!: ElementRef;
@@ -751,18 +893,41 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   searchTerm = '';
   currentUserId = '';
 
+  // Search functionality
+  searchQuery = '';
+  searchResults: Message[] = [];
+  isSearching = false;
+  showSearchResults = false;
+  searchPage = 1;
+  searchTotalPages = 1;
+
+  // Message pagination
+  hasMoreMessages = true;
+  isLoadingMoreMessages = false;
+  lastMessageId: string | null = null;
+
   // Socket data
-  channelUsers: ChannelUsers | null = null;
-  typingUsers: TypingUser[] = [];
+  typingUsers: TypingIndicator[] = [];
   showUserList: boolean = false;
+  onlineUsers: UserPresence[] = [];
+  userPresenceMap: Map<string, UserPresence> = new Map();
+
+  // File upload data
+  uploadProgress: UploadProgress = { loaded: 0, total: 0, percentage: 0 };
+  isUploading = false;
+  uploadType: 'image' | 'file' | null = null;
+  uploadingFileName = '';
 
   ngOnInit(): void {
     this.currentUserId = this.authService.getCurrentUser()?.id || '';
     this.normalizeMessagesInLocalStorage(); // Clean up old message format
     this.loadGroups();
     this.setupSocketSubscriptions();
-    this.setupVideoCallSubscriptions();
+    this.setupUploadSubscriptions();
     this.socketService.connect();
+
+    // Update user presence when component initializes
+    this.updateUserPresence();
   }
 
   ngOnDestroy(): void {
@@ -776,62 +941,97 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   }
 
   private setupSocketSubscriptions(): void {
-    // New message subscription
-    this.socketService.newMessage$
+    // Messages subscription
+    this.socketService.message$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(message => {
-        if (message && message.channelId === this.selectedChannel?._id) {
-          this.messages.push(message);
-        }
-      });
-
-    // Previous messages subscription
-    this.socketService.previousMessages$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(messages => {
-        this.messages = messages;
-        this.loadingMessages = false;
-      });
-
-    // Channel users subscription
-    this.socketService.channelUsers$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(channelUsers => {
-        if (channelUsers && channelUsers.channelId === this.selectedChannel?._id) {
-          this.channelUsers = channelUsers;
-        }
+      .subscribe((message: SocketMessage) => {
+        this.messages.push(message);
+        this.scrollToBottom();
       });
 
     // Typing users subscription
-    this.socketService.typingUsers$
+    this.socketService.typing$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(typingUsers => {
-        this.typingUsers = typingUsers.filter(user => user.channelId === this.selectedChannel?._id);
+      .subscribe((typingIndicator: TypingIndicator) => {
+        if (typingIndicator.channelId === this.selectedChannel?._id) {
+          if (typingIndicator.isTyping) {
+            const existingIndex = this.typingUsers.findIndex(u => u.userId === typingIndicator.userId);
+            if (existingIndex === -1) {
+              this.typingUsers.push(typingIndicator);
+            }
+          } else {
+            this.typingUsers = this.typingUsers.filter(u => u.userId !== typingIndicator.userId);
+          }
+        }
       });
 
-    // User joined/left subscriptions
+    // User presence subscription
+    this.socketService.presence$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((presence: UserPresence) => {
+        this.userPresenceMap.set(presence.userId, presence);
+        this.updateOnlineUsersList();
+      });
+
+    // User join subscription
     this.socketService.userJoined$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(data => {
-        if (data && data.channelId === this.selectedChannel?._id) {
-          this.snackBar.open(data.message, 'Close', { duration: 3000 });
+      .subscribe((event: ChannelJoin) => {
+        if (event.channelId === this.selectedChannel?._id) {
+          this.showNotification(`${event.username} joined the channel`);
         }
       });
 
+    // User leave subscription
     this.socketService.userLeft$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(data => {
-        if (data && data.channelId === this.selectedChannel?._id) {
-          this.snackBar.open(data.message, 'Close', { duration: 3000 });
+      .subscribe((event: ChannelLeave) => {
+        if (event.channelId === this.selectedChannel?._id) {
+          this.showNotification(`${event.username} left the channel`);
         }
       });
 
-    // Error subscription
-    this.socketService.error$
+    // Connection status subscription
+    this.socketService.connection$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(error => {
-        if (error) {
-          this.snackBar.open(error, 'Close', { duration: 5000 });
+      .subscribe((isConnected: boolean) => {
+        if (isConnected) {
+          console.log('Socket connected successfully');
+        }
+      });
+
+    // Real-time message subscription
+    this.socketService.message$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((socketMessage: any) => {
+        console.log('Received real-time message:', socketMessage);
+        console.log('Message object:', socketMessage.message);
+
+        // Only add message if it's for the current channel
+        if (socketMessage.channelId === this.selectedChannel?._id) {
+          // Check if this is our own message (prevent duplicate)
+          const currentUser = this.authService.getCurrentUser();
+          console.log('Current user ID:', currentUser?.id);
+          console.log('Message user ID:', socketMessage.message.userId);
+          console.log('Are they equal?', socketMessage.message.userId === currentUser?.id);
+
+          if (socketMessage.message.userId === currentUser?.id) {
+            console.log('Skipping own message from Socket.IO');
+            return;
+          }
+
+          // Map Socket.IO message to SocketMessage format
+          const mappedMessage = this.mapMessageToSocketMessage(socketMessage.message);
+          console.log('Mapped message:', mappedMessage);
+
+          // Validate mapped message before adding
+          if (mappedMessage._id && mappedMessage.text && mappedMessage.userId) {
+            this.messages.push(mappedMessage);
+            this.cdr.detectChanges(); // Trigger change detection
+            this.scrollToBottom();
+          } else {
+            console.warn('Invalid message format, skipping:', mappedMessage);
+          }
         }
       });
   }
@@ -839,19 +1039,25 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   private async loadGroups(): Promise<void> {
     try {
       this.loadingGroups = true;
-      const response = await this.groupsService.getUserGroups().toPromise();
-      const groups = response?.groups || [];
+      const response = await this.groupService.getMyGroups().toPromise();
+      const groups = response?.data || [];
 
       // Map groups to include channels
-      this.groups = groups.map(group => ({
-        ...group,
-        channels: group.channels.map((channelId: string, index: number) => ({
-          _id: channelId,
-          name: `Channel ${index + 1}`,
-          description: `Channel in ${group.name}`,
-          groupId: group.id,
-          isPrivate: false
-        }))
+      this.groups = groups.map((group: any) => ({
+        id: group._id || group.id,
+        name: group.name,
+        description: group.description,
+        category: group.category || 'general',
+        status: group.status || 'active',
+        createdBy: group.createdBy,
+        admins: group.admins || [],
+        members: group.members || [],
+        channels: group.channels || [],
+        createdAt: new Date(group.createdAt),
+        updatedAt: new Date(group.updatedAt),
+        isActive: group.isActive !== undefined ? group.isActive : true,
+        memberCount: group.memberCount || 0,
+        maxMembers: group.maxMembers
       }));
 
       this.filteredGroups = [...this.groups];
@@ -883,18 +1089,51 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   selectChannel(channel: Channel): void {
     if (this.selectedChannel?._id === channel._id) return;
 
+    // Leave previous channel
+    if (this.selectedChannel) {
+      this.socketService.leaveChannel(this.selectedChannel._id);
+    }
+
     this.selectedChannel = channel;
-    this.messages = [];
+    this.messages = []; // Clear messages for new channel
     this.loadingMessages = true;
 
-    // Join channel via socket
-    this.socketService.joinChannel({
-      channelId: channel._id,
-      channelName: channel.name
-    });
+    // No need to join channel since user is already in the group
 
-    // Get channel users
-    this.socketService.getChannelUsers(channel._id);
+    // Update user presence to show current channel
+    this.updateUserPresence();
+
+    // Load previous messages
+    this.loadChannelMessages(channel._id);
+  }
+
+  private loadChannelMessages(channelId: string): void {
+    this.loadingMessages = true;
+    this.hasMoreMessages = true;
+    this.lastMessageId = null;
+    this.messages = [];
+
+    this.messageService.getMessagesByChannel(channelId, { limit: 50 })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            // Map API messages to SocketMessage format
+            this.messages = response.data.map(msg => this.mapMessageToSocketMessage(msg));
+            this.lastMessageId = this.messages.length > 0 ? this.messages[this.messages.length - 1]._id : null;
+            this.hasMoreMessages = response.data.length === 50; // If we got 50 messages, there might be more
+            this.scrollToBottom();
+          } else {
+            this.snackBar.open('Failed to load messages', 'Close', { duration: 3000 });
+          }
+          this.loadingMessages = false;
+        },
+        error: (error) => {
+          console.error('Error loading messages:', error);
+          this.snackBar.open('Failed to load messages', 'Close', { duration: 3000 });
+          this.loadingMessages = false;
+        }
+      });
   }
 
   sendMessage(): void {
@@ -902,14 +1141,39 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
       return;
     }
 
-    this.socketService.sendMessage({
-      channelId: this.selectedChannel._id,
-      text: this.newMessage.trim(),
-      type: 'text'
-    });
+    const currentUser = this.authService.getCurrentUser();
+    if (!currentUser) return;
 
-    this.newMessage = '';
-    this.stopTyping();
+    // Send via Socket.IO for real-time messaging
+    if (this.socketService.isSocketConnected()) {
+      const messageData = {
+        channelId: this.selectedChannel._id,
+        text: this.newMessage.trim(),
+        type: 'text' as const
+      };
+
+      this.socketService.sendMessage(messageData);
+      this.newMessage = '';
+      this.stopTyping();
+    } else {
+      // Fallback to HTTP API if Socket.IO not connected
+      this.messageService.sendTextMessage(this.selectedChannel._id, this.newMessage.trim())
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (response) => {
+            if (response.success) {
+              this.newMessage = '';
+              this.stopTyping();
+            } else {
+              this.snackBar.open('Failed to send message', 'Close', { duration: 3000 });
+            }
+          },
+          error: (error) => {
+            console.error('Error sending message:', error);
+            this.snackBar.open('Failed to send message', 'Close', { duration: 3000 });
+          }
+        });
+    }
   }
 
   onKeyDown(event: KeyboardEvent): void {
@@ -922,7 +1186,10 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   onTyping(): void {
     if (!this.selectedChannel || !this.socketService.isSocketConnected) return;
 
-    this.socketService.startTyping(this.selectedChannel._id);
+    const currentUser = this.authService.getCurrentUser();
+    if (!currentUser) return;
+
+    this.socketService.sendTyping(this.selectedChannel._id, true);
 
     // Clear existing timeout
     if (this.typingTimeout) {
@@ -936,8 +1203,11 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
   }
 
   private stopTyping(): void {
-    if (this.selectedChannel && this.socketService.isSocketConnected) {
-      this.socketService.stopTyping(this.selectedChannel._id);
+    if (this.selectedChannel && this.socketService.isSocketConnected()) {
+      const currentUser = this.authService.getCurrentUser();
+      if (currentUser) {
+        this.socketService.sendTyping(this.selectedChannel._id, false);
+      }
     }
   }
 
@@ -954,11 +1224,186 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
     }
   }
 
-  trackByMessageId(index: number, message: SocketMessage): string {
-    return message.message._id;
+  getOnlineUsersCount(): number {
+    return this.onlineUsers.filter(user => user.status === 'online').length;
   }
 
-  formatTime(timestamp: string): string {
+  getOnlineUsers(): UserPresence[] {
+    return this.onlineUsers.filter(user => user.status === 'online');
+  }
+
+  /**
+   * Update online users list based on presence data
+   */
+  private updateOnlineUsersList(): void {
+    this.onlineUsers = Array.from(this.userPresenceMap.values())
+      .filter(user => user.status === 'online' || user.status === 'away')
+      .sort((a, b) => {
+        // Sort by status (online first) then by username
+        if (a.status === 'online' && b.status !== 'online') return -1;
+        if (a.status !== 'online' && b.status === 'online') return 1;
+        return a.username.localeCompare(b.username);
+      });
+  }
+
+  /**
+   * Update user presence status
+   */
+  private updateUserPresence(): void {
+    if (this.socketService.isSocketConnected()) {
+      const currentChannelId = this.selectedChannel?._id;
+      this.socketService.updatePresence('online', currentChannelId);
+    }
+  }
+
+  /**
+   * Setup upload progress subscriptions
+   */
+  private setupUploadSubscriptions(): void {
+    this.uploadService.uploadProgress$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(progress => {
+        this.uploadProgress = progress;
+        this.isUploading = progress.percentage > 0 && progress.percentage < 100;
+      });
+  }
+
+  trackByMessageId(index: number, message: SocketMessage): string {
+    return message._id;
+  }
+
+  /**
+   * Map API Message to SocketMessage format
+   */
+  mapMessageToSocketMessage(message: any): SocketMessage {
+    return {
+      _id: message._id || '',
+      channelId: message.channelId || '',
+      userId: message.userId || '',
+      username: message.username || 'Unknown',
+      text: message.text || '',
+      type: message.type || 'text',
+      imageUrl: message.imageUrl,
+      fileUrl: message.fileUrl,
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      createdAt: message.createdAt ?
+        (typeof message.createdAt === 'string' ? message.createdAt : message.createdAt.toISOString()) :
+        new Date().toISOString()
+    };
+  }
+
+  /**
+   * Search messages in current channel
+   */
+  searchMessages(): void {
+    if (!this.searchQuery.trim() || !this.selectedChannel) {
+      this.showSearchResults = false;
+      return;
+    }
+
+    this.isSearching = true;
+    this.searchPage = 1;
+
+    this.messageService.searchMessages(this.searchQuery.trim(), {
+      channelId: this.selectedChannel._id,
+      limit: 20,
+      offset: 0
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.searchResults = response.data.messages;
+            this.searchTotalPages = response.data.totalPages;
+            this.showSearchResults = true;
+          } else {
+            this.snackBar.open('Search failed', 'Close', { duration: 3000 });
+          }
+          this.isSearching = false;
+        },
+        error: (error) => {
+          console.error('Error searching messages:', error);
+          this.snackBar.open('Search failed', 'Close', { duration: 3000 });
+          this.isSearching = false;
+        }
+      });
+  }
+
+  /**
+   * Load more search results
+   */
+  loadMoreSearchResults(): void {
+    if (this.searchPage >= this.searchTotalPages || !this.selectedChannel) return;
+
+    this.searchPage++;
+    this.isSearching = true;
+
+    this.messageService.searchMessages(this.searchQuery.trim(), {
+      channelId: this.selectedChannel._id,
+      limit: 20,
+      offset: (this.searchPage - 1) * 20
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.searchResults = [...this.searchResults, ...response.data.messages];
+          }
+          this.isSearching = false;
+        },
+        error: (error) => {
+          console.error('Error loading more search results:', error);
+          this.isSearching = false;
+        }
+      });
+  }
+
+  /**
+   * Clear search results
+   */
+  clearSearch(): void {
+    this.searchQuery = '';
+    this.searchResults = [];
+    this.showSearchResults = false;
+    this.searchPage = 1;
+  }
+
+  /**
+   * Load more messages (pagination)
+   */
+  loadMoreMessages(): void {
+    if (!this.hasMoreMessages || this.isLoadingMoreMessages || !this.selectedChannel || !this.lastMessageId) {
+      return;
+    }
+
+    this.isLoadingMoreMessages = true;
+
+    this.messageService.getMessageHistory(this.selectedChannel._id, {
+      before: this.lastMessageId,
+      limit: 50
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data.length > 0) {
+            const newMessages = response.data.map(msg => this.mapMessageToSocketMessage(msg));
+            this.messages = [...newMessages, ...this.messages];
+            this.lastMessageId = newMessages[0]._id;
+            this.hasMoreMessages = response.data.length === 50;
+          } else {
+            this.hasMoreMessages = false;
+          }
+          this.isLoadingMoreMessages = false;
+        },
+        error: (error) => {
+          console.error('Error loading more messages:', error);
+          this.isLoadingMoreMessages = false;
+        }
+      });
+  }
+
+  formatTime(timestamp: number): string {
     const date = new Date(timestamp);
     const now = new Date();
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
@@ -977,122 +1422,229 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
     }
   }
 
-  onImageUploaded(response: UploadResponse): void {
-    if (response.success && this.selectedChannel) {
-      // Send image message via socket
-      this.socketService.sendMessage({
-        channelId: this.selectedChannel._id,
-        text: 'Image',
-        type: 'image',
-        imageUrl: response.data.imageUrl
-      });
+  onImageSelected(file: File): void {
+    if (!this.selectedChannel) return;
+
+    // Validate file type and size
+    if (!this.uploadService.validateFileType(file, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'])) {
+      this.snackBar.open('Please select a valid image file (JPEG, PNG, GIF, WebP)', 'Close', { duration: 3000 });
+      return;
     }
-  }
 
-  onUploadError(error: string): void {
-    this.snackBar.open(error, 'Close', { duration: 3000 });
-  }
-
-  // Video call methods
-  toggleUserList(): void {
-    this.showUserList = !this.showUserList;
-  }
-
-  onVideoCallInitiated(event: { userId: string; username: string; channelId: string }): void {
-    if (this.selectedChannel) {
-      this.videoCallService.initiateCall(event.userId, event.channelId);
-      this.openVideoCallDialog();
+    if (!this.uploadService.validateFileSize(file, 10)) { // 10MB limit
+      this.snackBar.open('Image size must be less than 10MB', 'Close', { duration: 3000 });
+      return;
     }
-  }
 
-  private openVideoCallDialog(): void {
-    const dialogRef = this.dialog.open(VideoCallComponent, {
-      width: '100%',
-      height: '100%',
-      maxWidth: '100vw',
-      maxHeight: '100vh',
-      panelClass: 'video-call-dialog',
-      disableClose: true,
-      data: { isIncomingCall: false }
-    });
+    this.uploadType = 'image';
+    this.uploadingFileName = file.name;
+    this.isUploading = true;
 
-    dialogRef.afterClosed().subscribe(() => {
-      // Handle dialog close
-    });
-  }
-
-  private setupVideoCallSubscriptions(): void {
-    // Listen for incoming video calls
-    this.videoCallService.incomingCall$
+    // Upload image using UploadService
+    this.uploadService.uploadImage(file)
       .pipe(takeUntil(this.destroy$))
-      .subscribe(incomingCall => {
-        if (incomingCall) {
-          this.openIncomingCallDialog(incomingCall);
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data.imageUrl) {
+            // Send image message via MessageService for persistence
+            this.messageService.sendImageMessage(
+              this.selectedChannel!._id,
+              response.data.imageUrl,
+              response.data.originalName || file.name,
+              response.data.size || file.size
+            )
+              .pipe(takeUntil(this.destroy$))
+              .subscribe({
+                next: (messageResponse) => {
+                  if (messageResponse.success) {
+                    // Message will be received via socket
+                    this.snackBar.open('Image sent successfully', 'Close', { duration: 2000 });
+                  } else {
+                    this.snackBar.open('Failed to send image message', 'Close', { duration: 3000 });
+                  }
+                },
+                error: (error) => {
+                  console.error('Error sending image message:', error);
+                  this.snackBar.open('Failed to send image message', 'Close', { duration: 3000 });
+                }
+              });
+          } else {
+            this.snackBar.open('Failed to upload image', 'Close', { duration: 3000 });
+          }
+          this.isUploading = false;
+          this.uploadType = null;
+          this.uploadingFileName = '';
+        },
+        error: (error) => {
+          console.error('Image upload failed:', error);
+          this.snackBar.open('Failed to upload image', 'Close', { duration: 3000 });
+          this.isUploading = false;
+          this.uploadType = null;
+          this.uploadingFileName = '';
         }
       });
   }
 
-  private openIncomingCallDialog(incomingCall: any): void {
+  /**
+   * Handle file selection for upload
+   */
+  onFileSelected(file: File | null): void {
+    if (!this.selectedChannel || !file) return;
+
+    // Validate file type and size
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'application/zip',
+      'application/x-rar-compressed'
+    ];
+
+    if (!this.uploadService.validateFileType(file, allowedTypes)) {
+      this.snackBar.open('Please select a valid file (PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, ZIP, RAR)', 'Close', { duration: 3000 });
+      return;
+    }
+
+    if (!this.uploadService.validateFileSize(file, 50)) { // 50MB limit
+      this.snackBar.open('File size must be less than 50MB', 'Close', { duration: 3000 });
+      return;
+    }
+
+    this.uploadType = 'file';
+    this.uploadingFileName = file.name;
+    this.isUploading = true;
+
+    // Upload file using UploadService
+    this.uploadService.uploadFile(file)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data.fileUrl) {
+            // Send file message via MessageService for persistence
+            this.messageService.sendFileMessage(
+              this.selectedChannel!._id,
+              response.data.fileUrl,
+              response.data.originalName || file.name,
+              response.data.size || file.size
+            )
+              .pipe(takeUntil(this.destroy$))
+              .subscribe({
+                next: (messageResponse) => {
+                  if (messageResponse.success) {
+                    // Message will be received via socket
+                    this.snackBar.open('File sent successfully', 'Close', { duration: 2000 });
+                  } else {
+                    this.snackBar.open('Failed to send file message', 'Close', { duration: 3000 });
+                  }
+                },
+                error: (error) => {
+                  console.error('Error sending file message:', error);
+                  this.snackBar.open('Failed to send file message', 'Close', { duration: 3000 });
+                }
+              });
+          } else {
+            this.snackBar.open('Failed to upload file', 'Close', { duration: 3000 });
+          }
+          this.isUploading = false;
+          this.uploadType = null;
+          this.uploadingFileName = '';
+        },
+        error: (error) => {
+          console.error('File upload failed:', error);
+          this.snackBar.open('Failed to upload file', 'Close', { duration: 3000 });
+          this.isUploading = false;
+          this.uploadType = null;
+          this.uploadingFileName = '';
+        }
+      });
+  }
+
+  /**
+   * Get file icon based on file type
+   */
+  getFileIcon(fileName: string): string {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    switch (extension) {
+      case 'pdf': return 'picture_as_pdf';
+      case 'doc':
+      case 'docx': return 'description';
+      case 'xls':
+      case 'xlsx': return 'table_chart';
+      case 'ppt':
+      case 'pptx': return 'slideshow';
+      case 'txt': return 'text_snippet';
+      case 'zip':
+      case 'rar': return 'folder_zip';
+      default: return 'insert_drive_file';
+    }
+  }
+
+  /**
+   * Download file
+   */
+  downloadFile(fileUrl: string, fileName: string): void {
+    const link = document.createElement('a');
+    link.href = fileUrl;
+    link.download = fileName;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  /**
+   * Format file size for display
+   */
+  formatFileSize(bytes: number): string {
+    return this.uploadService.getFileSizeString(bytes);
+  }
+
+  onImageUploaded(response: UploadResponse): void {
+    // This method is kept for compatibility but the main logic is in onImageSelected
+    console.log('Image uploaded:', response);
+  }
+
+  onUploadError(error: string): void {
+    this.snackBar.open(error, 'Close', { duration: 3000 });
+    this.isUploading = false;
+    this.uploadType = null;
+    this.uploadingFileName = '';
+  }
+
+  private showNotification(message: string): void {
+    this.snackBar.open(message, 'Close', { duration: 3000 });
+  }
+
+  // Video call methods
+  onVideoCall(event: { userId: string; username: string }): void {
     const dialogRef = this.dialog.open(VideoCallComponent, {
-      width: '100%',
-      height: '100%',
+      width: '100vw',
+      height: '100vh',
       maxWidth: '100vw',
       maxHeight: '100vh',
-      panelClass: 'video-call-dialog',
-      disableClose: true,
-      data: { isIncomingCall: true, incomingCall }
+      panelClass: 'video-call-dialog'
     });
 
-    dialogRef.afterClosed().subscribe(() => {
-      // Handle dialog close
-    });
+    // Video call functionality commented out - component simplified
+    // dialogRef.componentInstance.startCall(event.userId, event.username);
   }
 
-  // Helper methods to safely access message properties
-  getUsername(message: SocketMessage): string {
-    if (!message?.message?.userId) return 'Unknown';
-
-    // Check if userId is an object with username
-    if (typeof message.message.userId === 'object' && 'username' in message.message.userId) {
-      return message.message.userId.username || 'Unknown';
-    }
-
-    // If userId is just a string, return Unknown
-    return 'Unknown';
+  toggleUserList(): void {
+    this.showUserList = !this.showUserList;
   }
 
-  getUserId(message: SocketMessage): string {
-    if (!message?.message?.userId) return '';
 
-    // Check if userId is an object with _id
-    if (typeof message.message.userId === 'object' && '_id' in message.message.userId) {
-      return message.message.userId._id || '';
-    }
 
-    // If userId is a string, return it
-    if (typeof message.message.userId === 'string') {
-      return message.message.userId;
-    }
 
-    return '';
-  }
 
-  getUserAvatar(message: SocketMessage): string | null {
-    if (!message?.message?.userId) return null;
-
-    // Check if userId is an object with avatarUrl
-    if (typeof message.message.userId === 'object' && 'avatarUrl' in message.message.userId) {
-      return message.message.userId.avatarUrl || null;
-    }
-
-    return null;
-  }
-
+  // Helper methods for message handling
   getMessageText(message: SocketMessage): string {
-    if (!message?.message) return '';
-
-    // Support both 'text' and 'content' fields for backward compatibility
-    return message.message.text || (message.message as any).content || '';
+    return message.text || '';
   }
 
   /**
@@ -1152,5 +1704,37 @@ export class RealtimeChatComponent implements OnInit, OnDestroy, AfterViewChecke
     } catch (error) {
       console.error('Error normalizing messages in localStorage:', error);
     }
+  }
+
+  /**
+   * Get channel receiver ID for video calls
+   */
+  getChannelReceiverId(): string {
+    // For now, return empty string - in a real implementation,
+    // you might want to get the first online user or a specific user
+    return '';
+  }
+
+  /**
+   * Get channel receiver name for video calls
+   */
+  getChannelReceiverName(): string {
+    // For now, return channel name - in a real implementation,
+    // you might want to get a specific user's name
+    return this.selectedChannel?.name || '';
+  }
+
+  /**
+   * Check if video call can be made
+   */
+  canMakeVideoCall(): boolean {
+    return !!(this.selectedChannel && this.getOnlineUsersCount() > 1);
+  }
+
+  /**
+   * Handle video call started event
+   */
+  onVideoCallStarted(): void {
+    this.snackBar.open('Video call started', 'Close', { duration: 2000 });
   }
 }

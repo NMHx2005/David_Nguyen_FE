@@ -6,7 +6,9 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatCardModule } from '@angular/material/card';
-import { Channel, ChannelType } from '../../../../models/channel.model';
+import { MatPaginatorModule } from '@angular/material/paginator';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { Channel, ChannelType, PaginationInfo } from '../../../../models/channel.model';
 import { User, UserRole } from '../../../../models/user.model';
 import { Group } from '../../../../models/group.model';
 
@@ -20,19 +22,28 @@ import { Group } from '../../../../models/group.model';
     MatIconModule,
     MatChipsModule,
     MatTooltipModule,
-    MatCardModule
+    MatCardModule,
+    MatPaginatorModule,
+    MatProgressSpinnerModule
   ],
   template: `
     <mat-card class="channels-table-card">
       <mat-card-header>
         <mat-card-title>
           <mat-icon>chat</mat-icon>
-          Channels List ({{ channels.length }})
+          Channels List ({{ pagination?.total || 0 }})
         </mat-card-title>
       </mat-card-header>
 
       <mat-card-content>
-        <div class="table-container">
+        <!-- Loading Spinner -->
+        <div *ngIf="loading" class="loading-container">
+          <mat-spinner diameter="50"></mat-spinner>
+          <p>Loading channels...</p>
+        </div>
+
+        <!-- Channels Table -->
+        <div *ngIf="!loading" class="table-container">
           <table mat-table [dataSource]="channels" class="channels-table">
             <!-- Name Column -->
             <ng-container matColumnDef="name">
@@ -124,11 +135,22 @@ import { Group } from '../../../../models/group.model';
         </div>
 
         <!-- Empty State -->
-        <div *ngIf="channels.length === 0" class="empty-state">
+        <div *ngIf="!loading && channels.length === 0" class="empty-state">
           <mat-icon class="empty-icon">chat_bubble_outline</mat-icon>
           <h3>No Channels Found</h3>
           <p>Try adjusting your search criteria or create a new channel.</p>
         </div>
+
+        <!-- Pagination -->
+        <mat-paginator 
+          *ngIf="!loading && pagination && pagination.pages > 1"
+          [length]="pagination.total"
+          [pageSize]="pagination.limit"
+          [pageIndex]="pagination.page - 1"
+          [pageSizeOptions]="[5, 10, 25, 50]"
+          (page)="onPageChange.emit($event.pageIndex + 1)"
+          showFirstLastButtons>
+        </mat-paginator>
       </mat-card-content>
     </mat-card>
   `,
@@ -227,6 +249,20 @@ import { Group } from '../../../../models/group.model';
       opacity: 0.7;
     }
 
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px;
+      color: #7f8c8d;
+    }
+
+    .loading-container p {
+      margin: 16px 0 0 0;
+      font-size: 14px;
+    }
+
     @media (max-width: 768px) {
       .action-buttons {
         flex-direction: column;
@@ -238,11 +274,14 @@ export class ChannelsTableComponent {
   @Input() channels: Channel[] = [];
   @Input() currentUser: User | null = null;
   @Input() groups: Group[] = [];
+  @Input() pagination: PaginationInfo | null = null;
+  @Input() loading: boolean = false;
 
   @Output() onViewChannel = new EventEmitter<Channel>();
   @Output() onEditChannel = new EventEmitter<Channel>();
   @Output() onBanUser = new EventEmitter<Channel>();
   @Output() onDeleteChannel = new EventEmitter<Channel>();
+  @Output() onPageChange = new EventEmitter<number>();
 
   displayedColumns = ['name', 'group', 'type', 'members', 'createdBy', 'created', 'actions'];
 

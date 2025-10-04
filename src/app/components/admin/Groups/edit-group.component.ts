@@ -6,11 +6,11 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { Subject, takeUntil } from 'rxjs';
-import { AuthService } from '../../auth/auth.service';
-import { GroupEditService } from './services/group-edit.service';
-import { GroupFormComponent } from './ui/group-form.component';
+import { AuthService } from '../../../services/auth.service';
 import { User } from '../../../models/user.model';
-import { Group } from '../../../models/group.model';
+import { GroupService } from '../../../services/group.service';
+import { GroupFormComponent } from './ui/group-form.component';
+import { Group, GroupStatus } from '../../../models/group.model';
 
 @Component({
   selector: 'app-edit-group',
@@ -145,14 +145,16 @@ export class EditGroupComponent implements OnInit, OnDestroy {
     private route: ActivatedRoute,
     private router: Router,
     private authService: AuthService,
-    private groupEditService: GroupEditService,
+    private groupService: GroupService,
     private snackBar: MatSnackBar
   ) { }
 
   ngOnInit(): void {
     this.currentUser = this.authService.getCurrentUser();
+    console.log('Edit Group - Current user:', this.currentUser);
     this.route.params.subscribe(params => {
       this.groupId = params['groupId'];
+      console.log('Edit Group - Group ID from route:', this.groupId);
       if (this.groupId) {
         this.loadGroup();
       }
@@ -169,19 +171,8 @@ export class EditGroupComponent implements OnInit, OnDestroy {
    * Subscribe to service observables
    */
   private subscribeToServices(): void {
-    // Subscribe to group data
-    this.groupEditService.group$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(group => {
-        this.group = group;
-        if (!group) {
-          this.snackBar.open('Group not found', 'Close', {
-            duration: 3000,
-            panelClass: ['error-snackbar']
-          });
-          this.router.navigate(['/admin/groups']);
-        }
-      });
+    // Load group data
+    this.loadGroup();
   }
 
   /**
@@ -189,26 +180,58 @@ export class EditGroupComponent implements OnInit, OnDestroy {
    */
   private loadGroup(): void {
     if (!this.groupId) {
+      console.error('No group ID provided');
       this.snackBar.open('Invalid group ID', 'Close', { duration: 3000 });
       this.router.navigate(['/admin/groups']);
       return;
     }
 
+    console.log('Loading group with ID:', this.groupId);
     this.isLoading = true;
-    this.groupEditService.loadGroup(this.groupId)
-      .then(result => {
-        if (!result.success) {
-          this.snackBar.open(result.message || 'Group not found', 'Close', { duration: 3000 });
-          this.router.navigate(['/admin/groups']);
+    this.groupService.getGroupById(this.groupId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: any) => {
+          console.log('Group API response:', response);
+          this.isLoading = false;
+          if (response.success) {
+            // Map API data to Group model
+            this.group = {
+              id: response.data._id || response.data.id,
+              name: response.data.name,
+              description: response.data.description,
+              category: response.data.category || 'general',
+              status: response.data.status || GroupStatus.ACTIVE,
+              createdBy: response.data.createdBy,
+              admins: response.data.admins || [],
+              members: response.data.members || [],
+              channels: response.data.channels || [],
+              createdAt: response.data.createdAt,
+              updatedAt: response.data.updatedAt,
+              isActive: response.data.isActive !== undefined ? response.data.isActive : true,
+              memberCount: response.data.memberCount,
+              maxMembers: response.data.maxMembers,
+              isPrivate: response.data.isPrivate,
+              tags: response.data.tags || []
+            };
+            console.log('Mapped group data:', this.group);
+          } else {
+            this.snackBar.open(response.message || 'Group not found', 'Close', { duration: 3000 });
+            // Only redirect if it's not a permission error
+            if (response.message !== 'Insufficient permissions') {
+              this.router.navigate(['/admin/groups']);
+            }
+          }
+        },
+        error: (error) => {
+          this.isLoading = false;
+          console.error('Error loading group:', error);
+          this.snackBar.open('Failed to load group', 'Close', { duration: 3000 });
+          // Only redirect if it's not a permission error
+          if (error.error?.message !== 'Insufficient permissions') {
+            this.router.navigate(['/admin/groups']);
+          }
         }
-      })
-      .catch(error => {
-        console.error('Error loading group:', error);
-        this.snackBar.open('Failed to load group', 'Close', { duration: 3000 });
-        this.router.navigate(['/admin/groups']);
-      })
-      .finally(() => {
-        this.isLoading = false;
       });
   }
 
@@ -223,19 +246,23 @@ export class EditGroupComponent implements OnInit, OnDestroy {
 
     this.isLoading = true;
     try {
-      const result = await this.groupEditService.updateGroup(this.groupId, formData, this.currentUser);
+      const result = await this.groupService.updateGroup(this.groupId, formData).toPromise();
 
-      if (result.success) {
-        this.snackBar.open(result.message, 'Close', {
+      if (result?.success) {
+        this.snackBar.open(result.message || 'Group updated successfully', 'Close', {
           duration: 3000,
           panelClass: ['success-snackbar']
         });
         this.router.navigate(['/admin/groups', this.groupId]);
       } else {
-        this.snackBar.open(result.message, 'Close', {
+        this.snackBar.open(result?.message || 'Failed to update group', 'Close', {
           duration: 5000,
           panelClass: ['error-snackbar']
         });
+        // Don't redirect for permission errors
+        if (result?.message !== 'Insufficient permissions') {
+          this.router.navigate(['/admin/groups', this.groupId]);
+        }
       }
     } catch (error) {
       console.error('Error updating group:', error);
@@ -243,6 +270,10 @@ export class EditGroupComponent implements OnInit, OnDestroy {
         duration: 5000,
         panelClass: ['error-snackbar']
       });
+      // Don't redirect for permission errors
+      if ((error as any)?.error?.message !== 'Insufficient permissions') {
+        this.router.navigate(['/admin/groups', this.groupId]);
+      }
     } finally {
       this.isLoading = false;
     }
