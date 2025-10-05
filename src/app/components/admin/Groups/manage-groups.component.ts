@@ -869,17 +869,7 @@ export class ManageGroupsComponent implements OnInit {
    * Debug user permissions
    */
   private debugUserPermissions(): void {
-    console.log('🔍 Current User:', this.currentUser);
-    console.log('🔍 User Roles:', this.currentUser?.roles);
-    console.log('🔍 Is Super Admin:', this.authService.isSuperAdmin());
-    console.log('🔍 Can Create Group:', this.canCreateGroup());
-
-    // Check if user has admin roles
-    if (this.currentUser?.roles) {
-      this.currentUser.roles.forEach(role => {
-        console.log(`🔍 User has role: ${role}`);
-      });
-    }
+    // Debug logging removed
   }
 
   loadGroups(): void {
