@@ -46,7 +46,11 @@ import { User, UserRole, UserStats, UserFilters } from '../../../models/user.mod
           <div class="page-header">
             <div class="header-content">
               <h1>Manage Users</h1>
-              <p>View, edit, and manage user accounts</p>
+              <p *ngIf="!isReadOnly()">View, edit, and manage user accounts</p>
+              <p *ngIf="isReadOnly()" class="read-only-notice">
+                <mat-icon>visibility</mat-icon>
+                Read-only access - You can view user information but cannot make changes
+              </p>
             </div>
             <div class="header-actions">
               <button mat-stroked-button routerLink="/admin">
@@ -88,6 +92,7 @@ import { User, UserRole, UserStats, UserFilters } from '../../../models/user.mod
           [selectedUsers]="selectedUsers"
           [pageSize]="pageSize"
           [currentPage]="currentPage"
+          [isReadOnly]="isReadOnly()"
           (onEditUser)="editUser($event)"
           (onDeleteUser)="deleteUser($event)"
           (onToggleUserStatus)="toggleUserStatus($event)"
@@ -125,6 +130,20 @@ import { User, UserRole, UserStats, UserFilters } from '../../../models/user.mod
     .header-content p {
       margin: 0;
       opacity: 0.9;
+    }
+
+    .read-only-notice {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #ff9800;
+      font-weight: 500;
+    }
+
+    .read-only-notice mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
     }
 
     .header-actions {
@@ -341,8 +360,45 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
    */
   canCreateUser(): boolean {
     if (!this.currentUser) return false;
-    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN) ||
-      this.currentUser.roles.includes(UserRole.GROUP_ADMIN);
+    // Only Super Admin can create users
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
+  }
+
+  /**
+   * Check if current user can edit users
+   */
+  canEditUser(): boolean {
+    if (!this.currentUser) return false;
+    // Only Super Admin can edit users
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
+  }
+
+  /**
+   * Check if current user can delete users
+   */
+  canDeleteUser(): boolean {
+    if (!this.currentUser) return false;
+    // Only Super Admin can delete users
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
+  }
+
+  /**
+   * Check if current user can perform bulk operations
+   */
+  canPerformBulkOperations(): boolean {
+    if (!this.currentUser) return false;
+    // Only Super Admin can perform bulk operations
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
+  }
+
+  /**
+   * Check if current user is read-only (Group Admin)
+   */
+  isReadOnly(): boolean {
+    if (!this.currentUser) return true;
+    // Group Admin has read-only access
+    return this.currentUser.roles.includes(UserRole.GROUP_ADMIN) &&
+      !this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
   }
 
   /**
@@ -351,6 +407,7 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
   openCreateUserDialog(): void {
     const dialogData: UserFormData = {
       canCreateSuperAdmin: this.canCreateSuperAdmin(),
+      canCreateGroupAdmin: this.canCreateGroupAdmin(),
       isEditMode: false
     };
 
@@ -409,6 +466,7 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
     const dialogData: UserFormData = {
       user: user,
       canCreateSuperAdmin: this.canCreateSuperAdmin(),
+      canCreateGroupAdmin: this.canCreateGroupAdmin(),
       isEditMode: true
     };
 
@@ -629,6 +687,13 @@ export class ManageUsersComponent implements OnInit, OnDestroy {
    * Check if current user can create super admin
    */
   private canCreateSuperAdmin(): boolean {
+    return this.currentUser?.roles.includes(UserRole.SUPER_ADMIN) || false;
+  }
+
+  /**
+   * Check if current user can create group admin
+   */
+  private canCreateGroupAdmin(): boolean {
     return this.currentUser?.roles.includes(UserRole.SUPER_ADMIN) || false;
   }
 }

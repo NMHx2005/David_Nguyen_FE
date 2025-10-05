@@ -52,11 +52,21 @@ export class UserGroupsService {
         }).subscribe({
             next: (response) => {
                 if (response.success) {
-                    this.groupsCache.next(response.data);
+                    // Safety check: ensure response.data is an array
+                    if (Array.isArray(response.data)) {
+                        this.groupsCache.next(response.data);
+                    } else {
+                        console.warn('UserGroupsService: response.data is not an array:', typeof response.data, response.data);
+                        this.groupsCache.next([]);
+                    }
+                } else {
+                    console.warn('UserGroupsService: API response not successful:', response);
+                    this.groupsCache.next([]);
                 }
             },
             error: (error) => {
                 console.error('Error loading groups:', error);
+                this.groupsCache.next([]);
             }
         });
     }
@@ -66,6 +76,11 @@ export class UserGroupsService {
      */
     getGroupById(groupId: string): Group | null {
         const groups = this.groupsCache.value;
+        // Safety check: ensure groups is an array
+        if (!Array.isArray(groups)) {
+            console.warn('UserGroupsService: groups is not an array:', typeof groups, groups);
+            return null;
+        }
         return groups.find(group => group._id === groupId) || null;
     }
 

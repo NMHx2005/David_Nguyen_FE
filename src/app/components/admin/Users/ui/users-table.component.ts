@@ -9,7 +9,6 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatCardModule } from '@angular/material/card';
 import { MatPaginatorModule } from '@angular/material/paginator';
 import { User, UserRole } from '../../../../models/user.model';
-import { UserGroupsService } from '../services/user-groups.service';
 import { Subject, takeUntil } from 'rxjs';
 
 @Component({
@@ -38,21 +37,29 @@ import { Subject, takeUntil } from 'rxjs';
             <mat-icon>check_circle</mat-icon>
             {{ selectedUsers.length }} selected
           </mat-chip>
-          <button mat-raised-button color="warn" (click)="onBulkDelete.emit(selectedUsers)">
+          <button mat-raised-button color="warn" 
+                  *ngIf="!isReadOnly" 
+                  (click)="onBulkDelete.emit(selectedUsers)">
             <mat-icon>delete</mat-icon>
             Delete Selected
           </button>
-          <button mat-raised-button color="primary" (click)="onBulkActivate.emit(selectedUsers)">
+          <button mat-raised-button color="primary" 
+                  *ngIf="!isReadOnly" 
+                  (click)="onBulkActivate.emit(selectedUsers)">
             <mat-icon>check_circle</mat-icon>
             Activate Selected
           </button>
+          <mat-chip *ngIf="isReadOnly" color="warn" class="read-only-chip">
+            <mat-icon>visibility</mat-icon>
+            Read-only mode
+          </mat-chip>
         </div>
       </mat-card-header>
       <mat-card-content>
         <div class="table-container">
           <table mat-table [dataSource]="paginatedUsers" class="users-table">
             <!-- Checkbox Column -->
-            <ng-container matColumnDef="select">
+            <ng-container matColumnDef="select" *ngIf="!isReadOnly">
               <th mat-header-cell *matHeaderCellDef>
                 <mat-checkbox 
                   [checked]="isAllSelected()" 
@@ -94,20 +101,6 @@ import { Subject, takeUntil } from 'rxjs';
               </td>
             </ng-container>
 
-            <!-- Groups Column -->
-            <ng-container matColumnDef="groups">
-              <th mat-header-cell *matHeaderCellDef>Groups</th>
-              <td mat-cell *matCellDef="let user">
-                <div class="groups-list">
-                  <mat-chip *ngFor="let groupId of user.groups.slice(0, 2)" class="group-chip">
-                    {{ getGroupName(groupId) }}
-                  </mat-chip>
-                  <mat-chip *ngIf="user.groups.length > 2" class="more-chip">
-                    +{{ user.groups.length - 2 }} more
-                  </mat-chip>
-                </div>
-              </td>
-            </ng-container>
 
             <!-- Status Column -->
             <ng-container matColumnDef="status">
@@ -129,7 +122,7 @@ import { Subject, takeUntil } from 'rxjs';
             </ng-container>
 
             <!-- Actions Column -->
-            <ng-container matColumnDef="actions">
+            <ng-container matColumnDef="actions" *ngIf="!isReadOnly">
               <th mat-header-cell *matHeaderCellDef>Actions</th>
               <td mat-cell *matCellDef="let user">
                 <button mat-icon-button [matMenuTriggerFor]="userMenu">
@@ -268,6 +261,12 @@ import { Subject, takeUntil } from 'rxjs';
       color: #666;
     }
 
+    .read-only-chip {
+      background-color: #ff9800;
+      color: white;
+      font-weight: 500;
+    }
+
     .delete-action {
       color: #f44336;
     }
@@ -314,6 +313,7 @@ export class UsersTableComponent implements OnInit, OnDestroy {
   @Input() selectedUsers: string[] = [];
   @Input() pageSize = 10;
   @Input() currentPage = 0;
+  @Input() isReadOnly = false;
 
   @Output() onEditUser = new EventEmitter<User>();
   @Output() onDeleteUser = new EventEmitter<User>();
@@ -322,10 +322,15 @@ export class UsersTableComponent implements OnInit, OnDestroy {
   @Output() onBulkActivate = new EventEmitter<string[]>();
   @Output() pageChange = new EventEmitter<any>();
 
-  displayedColumns: string[] = ['select', 'user', 'role', 'groups', 'status', 'created', 'actions'];
+  get displayedColumns(): string[] {
+    const baseColumns = ['user', 'role', 'status', 'created'];
+    if (!this.isReadOnly) {
+      return ['select', ...baseColumns, 'actions'];
+    }
+    return baseColumns;
+  }
 
   private destroy$ = new Subject<void>();
-  private userGroupsService = inject(UserGroupsService);
 
   get paginatedUsers(): User[] {
     const startIndex = this.currentPage * this.pageSize;
@@ -334,10 +339,7 @@ export class UsersTableComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    // Subscribe to groups updates
-    this.userGroupsService.groups$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe();
+    // Component initialization
   }
 
   ngOnDestroy(): void {
@@ -381,9 +383,6 @@ export class UsersTableComponent implements OnInit, OnDestroy {
     }
   }
 
-  getGroupName(groupId: string): string {
-    return this.userGroupsService.getGroupName(groupId);
-  }
 
   getRoleColor(role: UserRole): string {
     switch (role) {
@@ -421,27 +420,22 @@ export class UsersTableComponent implements OnInit, OnDestroy {
   }
 
   canEditUser(user: User): boolean {
-    if (!this.currentUser) return false;
-    if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
-    if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-      return !user.roles.includes(UserRole.SUPER_ADMIN) && !user.roles.includes(UserRole.GROUP_ADMIN);
-    }
-    return false;
+    if (!this.currentUser || this.isReadOnly) return false;
+    // Only Super Admin can edit users
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
   }
 
   canDeleteUser(user: User): boolean {
-    if (!this.currentUser) return false;
+    if (!this.currentUser || this.isReadOnly) return false;
     if (this.currentUser.id === user.id) return false; // Can't delete self
-    if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
-    if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-      return !user.roles.includes(UserRole.SUPER_ADMIN) && !user.roles.includes(UserRole.GROUP_ADMIN);
-    }
-    return false;
+    // Only Super Admin can delete users
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
   }
 
   canToggleUserStatus(user: User): boolean {
-    if (!this.currentUser) return false;
+    if (!this.currentUser || this.isReadOnly) return false;
     if (this.currentUser.id === user.id) return false; // Can't toggle own status
-    return this.canEditUser(user);
+    // Only Super Admin can toggle user status
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN);
   }
 }

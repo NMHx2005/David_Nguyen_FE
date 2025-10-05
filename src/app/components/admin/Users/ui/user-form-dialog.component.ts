@@ -12,6 +12,7 @@ import { User, UserRole } from '../../../../models/user.model';
 export interface UserFormData {
   user?: User;
   canCreateSuperAdmin: boolean;
+  canCreateGroupAdmin: boolean;
   isEditMode: boolean;
 }
 
@@ -70,7 +71,7 @@ export interface UserFormData {
             <mat-label>Role</mat-label>
             <mat-select formControlName="role">
               <mat-option value="user">User</mat-option>
-              <mat-option value="group_admin">Group Admin</mat-option>
+              <mat-option value="group_admin" *ngIf="data.canCreateGroupAdmin">Group Admin</mat-option>
               <mat-option value="super_admin" *ngIf="data.canCreateSuperAdmin">Super Admin</mat-option>
             </mat-select>
             <mat-error *ngIf="userForm.get('role')?.hasError('required')">
