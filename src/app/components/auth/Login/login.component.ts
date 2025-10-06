@@ -66,25 +66,26 @@ export class LoginComponent implements OnInit, OnDestroy {
         this.destroy$.complete();
     }
 
-    async onLoginSubmit(formData: LoginFormData): Promise<void> {
+    onLoginSubmit(formData: LoginFormData): void {
         this.isLoading = true;
         this.successMessage = '';
 
-        try {
-            const success = await this.authService.login(formData.username, formData.password);
-
-            if (success) {
-                this.snackBar.open('Login successful!', 'Close', { duration: 3000 });
-                this.redirectToAppropriatePage();
-            } else {
-                this.snackBar.open('Invalid credentials. Please try again.', 'Close', { duration: 5000 });
-            }
-        } catch (error) {
-            console.error('Login error:', error);
-            this.handleLoginError(error);
-        } finally {
-            this.isLoading = false;
-        }
+        this.authService.login(formData.username, formData.password)
+            .then((success: boolean) => {
+                if (success) {
+                    this.snackBar.open('Login successful!', 'Close', { duration: 3000 });
+                    this.redirectToAppropriatePage();
+                } else {
+                    this.snackBar.open('Invalid credentials. Please try again.', 'Close', { duration: 5000 });
+                }
+            })
+            .catch((error: any) => {
+                console.error('Login error:', error);
+                this.handleLoginError(error);
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
     }
 
     navigateToRegister(): void {
@@ -105,6 +106,8 @@ export class LoginComponent implements OnInit, OnDestroy {
             errorMessage = error.message;
         } else if (error.status === 401) {
             errorMessage = 'Invalid email or password. Please try again.';
+        } else if (error.status === 403) {
+            errorMessage = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
         } else if (error.status === 0) {
             errorMessage = 'Unable to connect to server. Please check your internet connection.';
         }

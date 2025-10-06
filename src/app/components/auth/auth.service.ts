@@ -116,8 +116,14 @@ export class AuthService {
         console.error('🔍 AuthService.login - Login failed:', response);
         return false;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('🔍 AuthService.login - Login error:', error);
+
+      // If it's an account locked error (403), throw it so LoginComponent can handle it
+      if (error.status === 403 || error.error?.message?.includes('khóa')) {
+        throw error;
+      }
+
       return false;
     }
   }

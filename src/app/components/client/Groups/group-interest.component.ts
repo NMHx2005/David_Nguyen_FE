@@ -165,8 +165,8 @@ export class GroupInterestComponent implements OnInit, OnDestroy {
       id: apiGroup._id || apiGroup.id,
       name: apiGroup.name,
       description: apiGroup.description,
-      category: 'general', // Default category since API doesn't have it
-      status: 'active' as any, // Default status
+      category: apiGroup.category || 'general',
+      status: apiGroup.status || 'active', // Use actual status from API
       createdBy: apiGroup.createdBy,
       admins: apiGroup.admins || [],
       members: validMembers.map((m: any) => m.userId),
@@ -223,6 +223,19 @@ export class GroupInterestComponent implements OnInit, OnDestroy {
               });
             } else {
               console.log('⚠️ User Groups empty or failed:', responses.userGroups);
+              // Fallback: check if current user is in group members from original API data
+              this.allGroups.forEach(group => {
+                // Find the group in original API response
+                const originalGroup = responses.allGroups.data.groups.find((g: any) => g._id === group.id);
+                if (originalGroup && originalGroup.members) {
+                  const isMember = originalGroup.members.some((member: any) =>
+                    member.userId === this.currentUser?.id
+                  );
+                  group.isJoined = isMember || false;
+                } else {
+                  group.isJoined = false;
+                }
+              });
             }
 
             // Load pending requests for current user
@@ -252,6 +265,16 @@ export class GroupInterestComponent implements OnInit, OnDestroy {
 
   private applyFiltersAndPagination(): void {
     let filteredGroups = [...this.allGroups];
+
+    // Filter out inactive groups, but keep groups that user has already joined
+    filteredGroups = filteredGroups.filter(group => {
+      // Always show groups that user has joined (even if inactive)
+      if (group.isJoined) {
+        return true;
+      }
+      // For non-joined groups, only show active ones
+      return group.status === 'active';
+    });
 
     // Apply search filter
     if (this.filters.searchTerm) {

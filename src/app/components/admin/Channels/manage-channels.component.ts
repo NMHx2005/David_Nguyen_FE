@@ -33,8 +33,7 @@ import { Channel, ChannelType } from '../../../models/channel.model';
         MatSnackBarModule,
         ChannelsStatsComponent,
         ChannelsFiltersComponent,
-        ChannelsTableComponent,
-        CreateChannelDialogComponent
+        ChannelsTableComponent
     ],
     template: `
       <div class="manage-channels-container">

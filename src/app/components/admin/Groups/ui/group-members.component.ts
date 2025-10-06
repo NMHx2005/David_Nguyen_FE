@@ -96,11 +96,11 @@ import { User, UserRole, Group } from '../../../../models';
         <mat-card-header>
           <mat-card-title>
             <mat-icon>people</mat-icon>
-            Members ({{ filteredMembers?.length || 0 }})
+            Members ({{ filteredMembers.length || 0 }})
           </mat-card-title>
         </mat-card-header>
         <mat-card-content>
-          <div class="members-list" *ngIf="(filteredMembers?.length || 0) > 0; else noMembers">
+          <div class="members-list" *ngIf="(filteredMembers.length || 0) > 0; else noMembers">
             <mat-list>
               <mat-list-item *ngFor="let member of filteredMembers" class="member-item">
                 <mat-icon matListItemAvatar>person</mat-icon>

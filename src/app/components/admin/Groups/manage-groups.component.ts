@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit, OnDestroy } from '@angular/core';
+import { Component, Inject, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators, FormGroup } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
@@ -822,7 +822,7 @@ export class CreateGroupDialogComponent {
     }
   `]
 })
-export class ManageGroupsComponent implements OnInit {
+export class ManageGroupsComponent implements OnInit, OnDestroy {
   groups: Group[] = [];
   filteredGroups: Group[] = [];
   searchTerm = '';
@@ -851,25 +851,57 @@ export class ManageGroupsComponent implements OnInit {
   totalPages = 0;
   isLoading = false;
 
+  private destroy$ = new Subject<void>();
+
   constructor(
     private authService: AuthService,
     private groupService: GroupService,
     private router: Router,
     private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private cdr: ChangeDetectorRef
   ) { }
 
   ngOnInit(): void {
+    // Ensure user data is loaded from localStorage first
+    this.authService.ensureUserLoaded();
+
+    // Subscribe to currentUser$ observable to ensure we get updates when user data loads
+    this.authService.currentUser$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(user => {
+        this.currentUser = user;
+        this.debugUserPermissions();
+        // Trigger change detection to update button states
+        this.cdr.detectChanges();
+      });
+
+    // Also try to get current user immediately in case it's already loaded
     this.currentUser = this.authService.getCurrentUser();
-    this.debugUserPermissions();
+    if (this.currentUser) {
+      this.debugUserPermissions();
+    }
+
     this.loadGroups();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   /**
    * Debug user permissions
    */
   private debugUserPermissions(): void {
-    // Debug logging removed
+    console.log('🔍 ManageGroupsComponent.debugUserPermissions - currentUser:', this.currentUser);
+    if (this.currentUser) {
+      console.log('🔍 ManageGroupsComponent.debugUserPermissions - user roles:', this.currentUser.roles);
+      console.log('🔍 ManageGroupsComponent.debugUserPermissions - canCreateGroup:', this.canCreateGroup());
+      console.log('🔍 ManageGroupsComponent.debugUserPermissions - canEditGroup (first group):', this.groups.length > 0 ? this.canEditGroup(this.groups[0]) : 'No groups');
+    } else {
+      console.log('🔍 ManageGroupsComponent.debugUserPermissions - No current user');
+    }
   }
 
   loadGroups(): void {
@@ -1024,47 +1056,35 @@ export class ManageGroupsComponent implements OnInit {
   // Business Logic: Permission checks
   canCreateGroup(): boolean {
     if (!this.currentUser) return false;
-    // Temporarily enable for all authenticated users for testing
-    return true;
-    // Original logic:
-    // return this.currentUser.roles.includes(UserRole.SUPER_ADMIN) ||
-    //   this.currentUser.roles.includes(UserRole.GROUP_ADMIN);
+    return this.currentUser.roles.includes(UserRole.SUPER_ADMIN) ||
+      this.currentUser.roles.includes(UserRole.GROUP_ADMIN);
   }
 
   canEditGroup(group: Group): boolean {
     if (!this.currentUser) return false;
-    // Temporarily enable for all authenticated users for testing
-    return true;
-    // Original logic:
-    // if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
-    // if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-    //   return group.createdBy === (this.currentUser as any).id;
-    // }
-    // return false;
+    if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
+    if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
+      return group.createdBy === (this.currentUser as any).id;
+    }
+    return false;
   }
 
   canDeleteGroup(group: Group): boolean {
     if (!this.currentUser) return false;
-    // Temporarily enable for all authenticated users for testing
-    return true;
-    // Original logic:
-    // if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
-    // if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-    //   return group.createdBy === (this.currentUser as any).id;
-    // }
-    // return false;
+    if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
+    if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
+      return group.createdBy === (this.currentUser as any).id;
+    }
+    return false;
   }
 
   canToggleGroupStatus(group: Group): boolean {
     if (!this.currentUser) return false;
-    // Temporarily enable for all authenticated users for testing
-    return true;
-    // Original logic:
-    // if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
-    // if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
-    //   return group.createdBy === (this.currentUser as any).id;
-    // }
-    // return false;
+    if (this.currentUser.roles.includes(UserRole.SUPER_ADMIN)) return true;
+    if (this.currentUser.roles.includes(UserRole.GROUP_ADMIN)) {
+      return group.createdBy === (this.currentUser as any).id;
+    }
+    return false;
   }
 
   // CRUD Operations

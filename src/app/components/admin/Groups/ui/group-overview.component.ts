@@ -35,7 +35,7 @@ import { Group, GroupStatus } from '../../../../models';
             </div>
             <div class="info-item">
               <label>Members:</label>
-              <span>{{ group.memberCount || (group.members?.length || 0) }} members</span>
+              <span>{{ group.memberCount || (group.members.length || 0) }} members</span>
             </div>
             <div class="info-item">
               <label>Channels:</label>

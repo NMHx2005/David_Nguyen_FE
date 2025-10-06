@@ -25,7 +25,7 @@ import { Group, GroupStatus } from '../../../../models/group.model';
           <div class="group-header">
             <mat-card-title>{{ group.name }}</mat-card-title>
             <div class="group-badges">
-              <mat-chip class="group-status" [ngClass]="group.status">
+              <mat-chip class="group-status" [ngClass]="'status-' + (group.status || 'active').toLowerCase()">
                 {{ getStatusLabel(group.status || 'active') }}
               </mat-chip>
               <mat-chip *ngIf="group.isPrivate" class="privacy-badge private">
@@ -81,9 +81,9 @@ import { Group, GroupStatus } from '../../../../models/group.model';
             mat-raised-button
             color="primary"
             (click)="onRegisterInterest(group)"
-            [disabled]="group.status === GroupStatus.INACTIVE"
-            matTooltip="{{ group.status === GroupStatus.INACTIVE ? 'Group is inactive' : 'Register interest to join' }}">
-            {{ group.status === GroupStatus.INACTIVE ? 'Inactive' : 'Register Interest' }}
+            [disabled]="group.status === 'inactive'"
+            matTooltip="{{ group.status === 'inactive' ? 'Group is inactive - not accepting new members' : 'Register interest to join' }}">
+            {{ group.status === 'inactive' ? 'Inactive' : 'Register Interest' }}
           </button>
 
           <button 
@@ -91,9 +91,9 @@ import { Group, GroupStatus } from '../../../../models/group.model';
             mat-button
             color="accent"
             (click)="onViewGroup(group)"
-            matTooltip="View group details">
+            matTooltip="{{ group.status === 'inactive' ? 'Group is inactive but you can still chat' : 'View group details' }}">
             <mat-icon>visibility</mat-icon>
-            View Group
+            {{ group.status === 'inactive' ? 'View Group (Inactive)' : 'View Group' }}
           </button>
 
           <button 
@@ -171,17 +171,17 @@ import { Group, GroupStatus } from '../../../../models/group.model';
       text-transform: uppercase;
     }
 
-    .group-status.open {
+    .group-status.status-active {
       background: #e8f5e8 !important;
       color: #2e7d32 !important;
     }
 
-    .group-status.closed {
+    .group-status.status-inactive {
       background: #fce4ec !important;
       color: #c2185b !important;
     }
 
-    .group-status.invite {
+    .group-status.status-pending {
       background: #fff3e0 !important;
       color: #ef6c00 !important;
     }
@@ -297,16 +297,13 @@ export class GroupsGridComponent {
   @Output() requestInvite = new EventEmitter<string>();
 
   getStatusLabel(status: GroupStatus | string): string {
-    const s = (typeof status === 'string') ? status.toString().toUpperCase() : status;
+    const s = (typeof status === 'string') ? status.toLowerCase() : (status as any)?.toString()?.toLowerCase();
     switch (s) {
-      case GroupStatus.ACTIVE:
-      case 'ACTIVE':
+      case 'active':
         return 'Active';
-      case GroupStatus.INACTIVE:
-      case 'INACTIVE':
+      case 'inactive':
         return 'Inactive';
-      case GroupStatus.PENDING:
-      case 'PENDING':
+      case 'pending':
         return 'Pending';
       default:
         return 'Unknown';

@@ -296,6 +296,12 @@ export class ErrorHandlerService implements ErrorHandler {
      * Handle forbidden errors
      */
     private handleForbidden(): void {
+        // Don't show snackbar for login errors - let LoginComponent handle it
+        const currentUrl = this.router.url;
+        if (currentUrl.includes('/login')) {
+            return;
+        }
+
         this.router.navigate(['/']);
         this.snackBar.open('Access denied. You do not have permission.', 'Go Home', {
             duration: 5000,
