@@ -107,7 +107,7 @@ export class LoginComponent implements OnInit, OnDestroy {
         } else if (error.status === 401) {
             errorMessage = 'Invalid email or password. Please try again.';
         } else if (error.status === 403) {
-            errorMessage = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+            errorMessage = 'Your account has been locked. Please contact administrator.';
         } else if (error.status === 0) {
             errorMessage = 'Unable to connect to server. Please check your internet connection.';
         }
